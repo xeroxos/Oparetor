@@ -1,0 +1,59 @@
+def fetch_profile_public(username):
+    """Use instaloader if present, else HTML parse. Returns dict."""
+    out = {"username":username, "fetched":False, "timestamp":datetime.utcnow().isoformat()}
+    if instaloader:
+        try:
+            L = instaloader.Instaloader(download_pictures=False, download_videos=False, save_metadata=False)
+            profile = instaloader.Profile.from_username(L.context, username)
+            out.update({
+                "full_name": profile.full_name,
+                "bio": profile.biography,
+                "external_url": profile.external_url,
+                "followers": profile.followers,
+                "following": profile.followees,
+                "media_count": profile.mediacount,
+                "is_private": profile.is_private,
+                "is_verified": profile.is_verified,
+                "profile_pic_url": profile.profile_pic_url,
+            })
+            out["fetched"] = True
+            return out
+        except Exception as e:
+            out["error_instaloader"] = str(e)
+    # Fallback parse
+    url = f"https://www.instagram.com/{username}/"
+    r = safe_get(url)
+    if not r:
+        out["error_http"] = "no_response"
+        return out
+    out["http_status"] = r.status_code
+    if r.status_code != 200:
+        out["error_http"] = f"status_{r.status_code}"
+        return out
+    html = r.text
+    m = re.search(r"window\._sharedData\s*=\s*({.*?});</script>", html, flags=re.S)
+    if m:
+        try:
+            data = json.loads(m.group(1))
+            user = data["entry_data"]["ProfilePage"][0]["graphql"]["user"]
+            out.update({
+                "full_name": user.get("full_name"),
+                "bio": user.get("biography"),
+                "followers": user.get("edge_followed_by",{}).get("count"),
+                "following": user.get("edge_follow",{}).get("count"),
+                "media_count": user.get("edge_owner_to_timeline_media",{}).get("count"),
+                "is_private": user.get("is_private"),
+                "is_verified": user.get("is_verified"),
+                "profile_pic_url": user.get("profile_pic_url_hd") or user.get("profile_pic_url"),
+            })
+            out["fetched"]=True
+        except Exception as e:
+            out["error_parse"]=str(e)
+    # try meta tags
+    if not out.get("fetched"):
+        mt = re.search(r'<meta property="og:title" content="([^"]+)"', html)
+        md = re.search(r'<meta property="og:description" content="([^"]+)"', html)
+        if mt: out["full_name"] = mt.group(1)
+        if md: out["bio"] = md.group(1)
+        out["fetched"] = True
+    return out

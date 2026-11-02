@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: xerox-uid
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
