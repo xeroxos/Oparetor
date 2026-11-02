@@ -1,0 +1,11 @@
+.git
+.agents
+.config
+.local
+**/node_modules
+**/dist
+**/__pycache__
+**/*.pyc
+**/*.tsbuildinfo
+artifacts/api-server/data.db
+attached_assets
