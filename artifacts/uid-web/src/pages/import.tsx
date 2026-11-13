@@ -40,6 +40,7 @@ function normalizeRow(row: unknown): UIDEntry | null {
     saved: Boolean(item.saved),
     fetchedAt: typeof item.fetchedAt === "string" ? item.fetchedAt : undefined,
     status: validStatus ? (item.status as UIDEntry["status"]) : "pending",
+    paused: Boolean(item.paused),
   };
 }
 
