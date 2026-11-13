@@ -109,7 +109,7 @@ function UIDCardImpl({
 
   return (
     <div
-      className="bg-card border border-card-border rounded-xl shadow-sm overflow-hidden relative"
+      className="bg-gradient-to-b from-[#172336] to-[#101a2b] border border-[#263650] rounded-[22px] shadow-md overflow-hidden relative"
       data-testid={`card-uid-${entry.uid}`}
       style={{ transform: `translateX(${swipeX}px)`, transition: swipeX === 0 ? "transform 0.2s ease" : "none" }}
       onTouchStart={onTouchStart}
@@ -138,7 +138,7 @@ function UIDCardImpl({
         )}
 
         {/* Avatar */}
-        <Avatar className="w-[72px] h-[72px] border-2 border-card-border shrink-0 rounded-xl">
+        <Avatar className="w-[72px] h-[96px] border-2 border-[#27a6ec] shrink-0 rounded-[17px]">
           <AvatarImage src={avatarURL} alt={entry.name || entry.uid} className="object-cover" loading="lazy" />
           <AvatarFallback className="text-sm font-mono font-bold text-[var(--text-muted)] bg-background rounded-xl">
             {initials}
