@@ -21,7 +21,7 @@ export async function fetchFBProfiles(
   uids: { uid: string; password?: string }[],
 ): Promise<FBBatchResponse> {
   if (!uids.length) return { success: true, results: [] };
-  if (uids.length > 18) throw new Error("Batch exceeds 18 UIDs");
+  if (uids.length > 15) throw new Error("Batch exceeds 15 UIDs");
 
   const normalized = uids.map(row => ({ uid: row.uid.trim() }));
   const storedCookie = getFBCookie().trim();

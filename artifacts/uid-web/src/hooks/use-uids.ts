@@ -4,7 +4,7 @@ import { fetchFBProfiles, type FBProfileResult } from "@/lib/api";
 
 // A single bounded fetch queue serves Import, Retry and individual cards.
 // Do not put users into a global "paused" mode after login/HTTP errors.
-const CHUNK_SIZE = 18;
+const CHUNK_SIZE = 6;
 const BETWEEN_BATCHES_MS = 1100;
 const RETRY_DELAY_MS = 1700;
 export const MAX_MANUAL_FETCH = 24;
