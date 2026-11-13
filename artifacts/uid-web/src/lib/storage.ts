@@ -45,6 +45,7 @@ let storageReady = false;
 let dbAvailable = false;
 let pendingChanges: Mutation[] = [];
 let writeQueue: Promise<void> = Promise.resolve();
+let lastWriteError: Error | null = null;
 
 function notify(): void {
   window.dispatchEvent(new Event("uids-updated"));
@@ -195,7 +196,10 @@ function mutate(operation: Mutation): boolean {
   if (!storageReady) pendingChanges.push(operation);
   if (storageReady && database) {
     const db = database;
-    writeQueue = writeQueue.then(() => persistDelta(db, previous, next)).catch(err => {
+    writeQueue = writeQueue.then(() => persistDelta(db, previous, next)).then(() => {
+      lastWriteError = null;
+    }).catch(err => {
+      lastWriteError = err instanceof Error ? err : new Error("UID database write failed");
       console.error("UID Operator IndexedDB save failed", err);
       window.dispatchEvent(new Event("uids-storage-error"));
     });
@@ -269,6 +273,7 @@ export function savePreferences(prefs: Partial<AppPreferences>): void {
 export async function flushUIDStorage(): Promise<void> {
   await waitForUIDStorage();
   await writeQueue;
+  if (lastWriteError) throw lastWriteError;
 }
 
 export async function waitForUIDStorage(): Promise<void> {
