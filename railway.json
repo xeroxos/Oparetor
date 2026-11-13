@@ -2,12 +2,12 @@
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
     "builder": "DOCKERFILE",
-    "dockerfilePath": "Dockerfile.railway"
+    "dockerfilePath": "Dockerfile.restore"
   },
   "deploy": {
-    "startCommand": "bun run index.tsx",
-    "healthcheckPath": "/api/healthz",
-    "healthcheckTimeout": 120,
+    "startCommand": "sh -c 'exec gunicorn --workers 1 --threads 8 --timeout 120 --bind 0.0.0.0:${PORT:-3000} fb_server:app'",
+    "healthcheckPath": "/api/health",
+    "healthcheckTimeout": 180,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 5
   }
