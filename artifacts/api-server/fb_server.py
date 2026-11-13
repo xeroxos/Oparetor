@@ -132,6 +132,16 @@ def get_public_info(uid: str) -> dict:
                 result['profile_pic'] = cdn
                 _cache_cdn(uid, cdn)  # pre-warm proxy cache
 
+        # --- Public follower count (only when exposed in page metadata) ---
+        og_desc = soup.find('meta', property='og:description') or soup.find('meta', attrs={'name': 'description'})
+        if og_desc and og_desc.get('content'):
+            match = re.search(r'([\\d,]+)\\s+followers', og_desc['content'], re.I)
+            if match:
+                try:
+                    result['follower_count'] = int(match.group(1).replace(',', ''))
+                except ValueError:
+                    pass
+
         # --- Username ---
         BAD_SLUGS = {'profile.php', 'home.php', 'login', 'sharer', ''}
         for src_attr in [
@@ -329,6 +339,8 @@ def fetch_uid_info(uid: str, extra_cookies: dict | None) -> dict:
     # Follower count
     if mbasic.get('follower_count') is not None:
         result['follower_count'] = mbasic['follower_count']
+    elif pub.get('follower_count') is not None:
+        result['follower_count'] = pub['follower_count']
 
     # Mark success
     if result['name'] or cdn_pic:
