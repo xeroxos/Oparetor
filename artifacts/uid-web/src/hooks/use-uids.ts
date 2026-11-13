@@ -117,8 +117,9 @@ async function runQueue(): Promise<void> {
       ).length;
       // Do not turn thousands of unrelated UIDs red if Facebook responds
       // with login/checkpoint or explicit rate limit for a whole batch.
-      const accessBlocked = profiles.filter(profile =>
-        profile && UPSTREAM_ACCESS_ERRORS.has(profile.error || "")
+      const accessBlocked = profiles.filter(
+        (profile): profile is FBProfileResult =>
+          Boolean(profile && UPSTREAM_ACCESS_ERRORS.has(profile.error || ""))
       );
       upstreamBlocked = successes === 0 && accessBlocked.length >= Math.ceil(chunk.length / 2);
       if (upstreamBlocked) {
@@ -128,14 +129,22 @@ async function runQueue(): Promise<void> {
       const upstreamLimited = Array.from(byUID.values()).some(p => p.error === "rate_limited");
       consecutiveRateLimits = upstreamLimited ? consecutiveRateLimits + 1 : 0;
       const now = new Date().toISOString();
-      updateUIDs(chunk.map(item => profileUpdate(item, byUID.get(item.uid), now)));
+      updateUIDs(chunk.map(item => upstreamBlocked
+        ? {
+            id: item.id,
+            status: hasFetchedProfileData(item) ? "success" as const : "pending" as const,
+            paused: false, retryQueued: false, fetchError: upstreamReason, fetchedAt: now,
+          }
+        : profileUpdate(item, byUID.get(item.uid), now)
+      ));
     } catch (error) {
       // Do not discard this chunk if the worker hits a local error.
       console.error("UID Operator fetch chunk error", error);
       const now = new Date().toISOString();
       updateUIDs(chunk.map(item => ({
-        id: item.id, status: "error" as const, paused: false,
-        retryQueued: false, fetchError: "network_error", fetchedAt: now,
+        id: item.id,
+        status: hasFetchedProfileData(item) ? "success" as const : "pending" as const,
+        paused: false, retryQueued: false, fetchError: "network_error", fetchedAt: now,
       })));
     } finally {
       for (const item of chunk) queuedIds.delete(item.id);
