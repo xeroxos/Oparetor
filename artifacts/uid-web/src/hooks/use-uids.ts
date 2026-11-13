@@ -79,8 +79,20 @@ async function runQueue(): Promise<void> {
       }
       if (!response && lastError) console.warn("UID Operator batch request failed", lastError);
 
+      // One extra attempt only for transport failures that the backend reports
+      // inside HTTP 200 results. Never re-request login/checkpoint or 429 pages.
       const byUID = new Map(response?.results.map(item => [item.uid, item.result]) || []);
-      const upstreamLimited = response?.results.some(row => row.result.error === "rate_limited") || false;
+      const transient = chunk.filter(item => byUID.get(item.uid)?.error === "network_error");
+      if (transient.length) {
+        await sleep(RETRY_DELAY_MS * 2);
+        try {
+          const retried = await fetchFBProfiles(transient.map(item => ({ uid: item.uid })));
+          for (const row of retried.results) byUID.set(row.uid, row.result);
+        } catch {
+          // Keep prior outcomes: next queued entries must not be lost.
+        }
+      }
+      const upstreamLimited = Array.from(byUID.values()).some(p => p.error === "rate_limited");
       consecutiveRateLimits = upstreamLimited ? consecutiveRateLimits + 1 : 0;
       const now = new Date().toISOString();
       updateUIDs(chunk.map(item => profileUpdate(item, byUID.get(item.uid), now)));
@@ -129,8 +141,9 @@ export function fetchNewUIDs(items: UIDEntry[]): Promise<void> {
   return enqueueFetch(items);
 }
 
+/** Queue every selected Failed UID; CHUNK_SIZE still bounds API work. */
 export function resumeUIDFetch(items: UIDEntry[]): Promise<void> {
-  return enqueueFetch(items.slice(0, MAX_MANUAL_FETCH));
+  return enqueueFetch(items);
 }
 
 export function useUIDs() {
