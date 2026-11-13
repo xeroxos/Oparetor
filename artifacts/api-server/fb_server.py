@@ -238,6 +238,8 @@ def get_followers_with_cookies(uid: str, cookies: dict) -> dict:
             )
             if r.status_code != 200:
                 return {}
+            if re.search(r'login|checkpoint|recover|save-device', str(r.url), re.I):
+                return {}
 
             soup = BeautifulSoup(r.text, 'html.parser')
 
@@ -438,8 +440,13 @@ def fetch_uids():
     if any(not isinstance(row, dict) or not re.fullmatch(r'[0-9]{5,25}', str(row.get('uid', ''))) for row in uid_list):
         return jsonify({'success': False, 'error': 'Each UID must contain 5-25 digits'}), 400
 
-    # Read cookie fresh at request time — no restart needed after env var update
-    cookie_str = os.environ.get('FB_DEFAULT_COOKIE', '')  # no browser session cookies accepted
+    # Restore legacy optional browser-session lookup, using the environment's
+    # configured session only when the browser has no user-supplied session.
+    # Credentials are used in-memory for this request, never logged or returned.
+    supplied_cookie = data.get('cookie', '')
+    if not isinstance(supplied_cookie, str) or len(supplied_cookie) > 8192:
+        return jsonify({'success': False, 'error': 'Invalid session cookie'}), 400
+    cookie_str = supplied_cookie.strip() or os.environ.get('FB_DEFAULT_COOKIE', '')
     global_cookies = parse_cookies(cookie_str)
 
     def process_one(item):
@@ -452,7 +459,7 @@ def fetch_uids():
         return {'uid': uid, 'result': result}
 
     results = []
-    max_workers = min(6, len(uid_list))
+    max_workers = min(10, len(uid_list))
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = [pool.submit(process_one, item) for item in uid_list]
         for fut in as_completed(futures):
