@@ -12,6 +12,7 @@ export interface UIDEntry {
   saved?: boolean;
   reInput?: boolean;
   paused?: boolean;
+  fetchError?: string;
 }
 
 export interface AppPreferences {

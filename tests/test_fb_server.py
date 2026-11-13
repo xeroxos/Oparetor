@@ -131,7 +131,43 @@ class UIDOperatorAPITests(unittest.TestCase):
         )
         with patch("fb_server.requests.get", return_value=fake):
             result = get_public_info("100000000000000")
-        self.assertFalse(result)
+        self.assertEqual(result["error"], "login_required")
+
+    def test_rate_limit_is_reported_without_repeated_requests(self):
+        fake = SimpleNamespace(status_code=429,
+                               url="https://m.facebook.com/profile.php?id=100000000000000",
+                               text="")
+        with patch("fb_server.requests.get", return_value=fake) as getter:
+            profile = get_public_info("100000000000000")
+        self.assertEqual(profile["error"], "rate_limited")
+        getter.assert_called_once()
+
+    def test_login_error_survives_public_profile_merge(self):
+        from fb_server import fetch_uid_info
+        with patch("fb_server.get_public_info", return_value={"error": "login_required"}):
+            profile = fetch_uid_info("100000000000000", None)
+        self.assertEqual(profile["status"], "error")
+        self.assertEqual(profile["error"], "login_required")
+
+    def test_batch_keeps_uid_when_worker_raises(self):
+        uids = [{"uid": "100000000000000"}, {"uid": "100000000000001"}]
+        with patch("fb_server.fetch_uid_info", side_effect=TimeoutError("mock upstream timeout")):
+            res = self.client.post("/api/fb/uid/fetch", json={"uids": uids})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(res.json["results"]), 2)
+        self.assertTrue(all(row["result"]["error"] == "network_error"
+                            for row in res.json["results"]))
+
+    def test_batch_diagnostics_do_not_expose_session(self):
+        stub = {"status": "error", "error": "rate_limited"}
+        with patch("fb_server.fetch_uid_info", return_value=stub):
+            res = self.client.post("/api/fb/uid/fetch", json={
+                "uids": [{"uid": "100000000000000"}],
+                "cookie": "c_user=secret_marker",
+            })
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json["diagnostics"]["limited"], 1)
+        self.assertNotIn("secret_marker", res.get_data(as_text=True))
 
     def test_public_avatar_url_validation(self):
         self.assertTrue(_valid_fb_image("https://scontent.xx.fbcdn.net/img.jpg"))

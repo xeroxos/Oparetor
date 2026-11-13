@@ -35,9 +35,12 @@ CNAME `u` → `geewwsio.up.railway.app`. Record is **DNS-only**, not proxied. Ra
 
 Public profile lookup:
 - Only numeric UIDs of 5–25 digits; max 15 per API request.
-- Requests are processed through a bounded browser queue of 12 at a time.
+- Requests are processed sequentially through the browser queue, 6 UIDs per batch with a gap between batches. Backend concurrency is limited to 3 workers; old 30-UID client requests remain supported.
 - Imported UID passwords are never transmitted to the profile API. If the user explicitly saves an authorized Facebook session in **Settings → Profile fetching session**, the session cookie is sent over HTTPS to this same-origin Railway backend only while fetching; it is used for the previous cookie-backed mbasic lookup and is never returned or logged. Avoid storing session cookies on a shared device.
-- Import can opt out of automatic lookup. Resume pending fetches after browser restart; failed entries can be manually retried.
+- Import can opt out of automatic lookup. Resume pending fetches after browser restart; failed entries can be manually retried in groups of up to 24.
+- When Facebook returns a login wall, HTTP 429/rate limit, or systemic network error, the browser queue stops immediately; the remaining UIDs stay in Pending with `paused` and `fetchError` in IndexedDB instead of being falsely labeled failed. After the source recovers, explicitly resume a small batch from the pause banner.
+- HTTP 200 for `POST /api/fb/uid/fetch` means the app accepted the batch, NOT that all UID metadata was retrieved. Check per-UID `status` / `error` and aggregate `diagnostics` returned by the endpoint.
+- Previously failed records from a bulk import are not reset or automatically re-fetched by a deployment; use small, manually triggered retry batches to avoid repeatedly querying a blocked source.
 - Photo fetch starts with direct HTTPS FB CDN; if that is blocked, the same-origin proxy may be used.
 - Facebook may restrict or change metadata access. A valid authorized session may allow details available to the logged-in account, but the app cannot guarantee fetching or bypass account restrictions. Do not share session cookies in messages or logs.
 

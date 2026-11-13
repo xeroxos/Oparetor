@@ -90,8 +90,9 @@ def get_public_info(uid: str, cookies: dict | None = None) -> dict:
         'login', 'sign up', 'create an account', ''
     }
     try:
-        # Public metadata only. A second endpoint is used if the first is blocked.
+        # Treat login walls and rate limits as stop conditions, not invalid UIDs.
         r = None
+        upstream_error = 'unavailable'
         for host in ('m.facebook.com', 'www.facebook.com'):
             try:
                 candidate = requests.get(
@@ -102,22 +103,29 @@ def get_public_info(uid: str, cookies: dict | None = None) -> dict:
                     allow_redirects=True,
                     verify=True,
                 )
-                if (candidate.status_code == 200
-                        and 'login' not in candidate.url.lower()
-                        and 'checkpoint' not in candidate.url.lower()):
+                if candidate.status_code == 429:
+                    return {'error': 'rate_limited'}
+                if candidate.status_code in (401, 403):
+                    return {'error': 'login_required'}
+                if candidate.status_code in (502, 503, 504):
+                    upstream_error = 'network_error'
+                    continue
+                if re.search(r'login|checkpoint|recover|save-device', str(candidate.url), re.I):
+                    return {'error': 'login_required'}
+                if candidate.status_code == 200:
                     r = candidate
                     break
             except requests.RequestException:
-                continue
+                upstream_error = 'network_error'
         if r is None:
-            return {}
+            return {'error': upstream_error}
         soup = BeautifulSoup(r.text, 'html.parser')
         result: dict = {}
 
         # --- Name ---
         t = soup.find('title')
         if t and re.search(r'log in|log into|sign up|create an account|checkpoint', t.get_text(strip=True), re.I):
-            return {}
+            return {'error': 'login_required'}
         if t:
             candidate = re.sub(r'\s*\|\s*Facebook\s*$', '', t.get_text(strip=True)).strip()
             if candidate.lower() not in BAD_TITLES and len(candidate) > 1 and not re.search(r'log in|sign up|create an account|facebook helps', candidate, re.I):
@@ -162,9 +170,11 @@ def get_public_info(uid: str, cookies: dict | None = None) -> dict:
             if m and m.group(1) not in BAD_SLUGS:
                 result['username'] = m.group(1)
 
+        if not (result.get('name') or result.get('profile_pic')):
+            result['error'] = 'unavailable'
         return result
     except Exception:
-        return {}
+        return {'error': 'network_error'}
 
 
 # Keep old name as alias for any callers
@@ -237,10 +247,14 @@ def get_followers_with_cookies(uid: str, cookies: dict) -> dict:
                 headers=BASE_HEADERS,
                 cookies=cookies,
             )
+            if r.status_code == 429:
+                return {'error': 'rate_limited'}
+            if r.status_code in (401, 403):
+                return {'error': 'login_required'}
             if r.status_code != 200:
-                return {}
+                return {'error': 'network_error' if r.status_code >= 500 else 'unavailable'}
             if re.search(r'login|checkpoint|recover|save-device', str(r.url), re.I):
-                return {}
+                return {'error': 'login_required'}
 
             soup = BeautifulSoup(r.text, 'html.parser')
 
@@ -249,7 +263,7 @@ def get_followers_with_cookies(uid: str, cookies: dict) -> dict:
             if title_tag:
                 title_text = title_tag.get_text(strip=True).lower()
                 if 'log in' in title_text or title_text in ('error', 'facebook'):
-                    return {}
+                    return {'error': 'login_required'}
 
             result = {}
 
@@ -279,7 +293,7 @@ def get_followers_with_cookies(uid: str, cookies: dict) -> dict:
 
             return result
     except Exception:
-        return {}
+        return {'error': 'network_error'}
 
 
 def check_instagram(username: str) -> bool:
@@ -347,9 +361,17 @@ def fetch_uid_info(uid: str, extra_cookies: dict | None) -> dict:
     elif pub.get('follower_count') is not None:
         result['follower_count'] = pub['follower_count']
 
-    # Mark success
+    # A login wall/rate limit is a batch stop, not proof that each UID is bad.
     if result['name'] or cdn_pic:
         result['status'] = 'success'
+    else:
+        reasons = {pub.get('error'), mbasic.get('error')}
+        for code in ('rate_limited', 'login_required', 'network_error', 'unavailable'):
+            if code in reasons:
+                result['error'] = code
+                break
+        else:
+            result['error'] = 'unavailable'
 
     # Instagram check (only if we have a username)
     if os.environ.get('ENABLE_INSTAGRAM_CHECK', 'false').lower() == 'true' and result.get('username'):
@@ -462,22 +484,44 @@ def fetch_uids():
         return {'uid': uid, 'result': result}
 
     results = []
-    max_workers = min(10, len(uid_list))
+    # Limit simultaneous upstream requests when processing repeated large imports.
+    # A failed worker must never silently drop a UID from the response.
+    max_workers = min(3, len(uid_list))
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = [pool.submit(process_one, item) for item in uid_list]
+        futures = {
+            pool.submit(process_one, item): str(item['uid'])
+            for item in uid_list
+        }
         for fut in as_completed(futures):
             try:
-                r = fut.result(timeout=25)
+                r = fut.result()
                 if r is not None:
                     results.append(r)
             except Exception:
-                pass
+                results.append({
+                    'uid': futures[fut],
+                    'result': {'status': 'error', 'error': 'network_error'}
+                })
 
+    diagnostics = {
+        'success': sum(1 for item in results if item['result'].get('status') == 'success'),
+        'limited': sum(1 for item in results if item['result'].get('error') == 'rate_limited'),
+        'login_required': sum(1 for item in results if item['result'].get('error') == 'login_required'),
+        'unavailable': sum(1 for item in results if item['result'].get('error') == 'unavailable'),
+        'network_error': sum(1 for item in results if item['result'].get('error') == 'network_error'),
+    }
+    # Aggregate outcome counts only. Never log UIDs, passwords, or sessions.
+    app.logger.info(
+        'uid_fetch_batch total=%d success=%d login=%d limited=%d network=%d unavailable=%d',
+        len(results), diagnostics['success'], diagnostics['login_required'],
+        diagnostics['limited'], diagnostics['network_error'], diagnostics['unavailable'],
+    )
     return jsonify({
         'success': True,
         'results': results,
         'total': len(results),
-        'timestamp': datetime.now().isoformat()
+        'timestamp': datetime.now().isoformat(),
+        'diagnostics': diagnostics,
     })
 
 

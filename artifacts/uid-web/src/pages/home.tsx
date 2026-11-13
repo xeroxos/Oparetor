@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { Link } from "wouter";
 import { Plus, Users, MoreHorizontal, RotateCw, Eye, EyeOff, ChevronLeft, ChevronRight, Hash } from "lucide-react";
-import { useUIDs, getFetchActivity } from "@/hooks/use-uids";
+import { useUIDs, getFetchActivity, getFetchPauseReason, MAX_MANUAL_FETCH } from "@/hooks/use-uids";
 import { usePreferences } from "@/hooks/use-preferences";
 import { Input } from "@/components/ui/input";
 import { UIDCard } from "@/components/uid-card";
@@ -27,7 +27,7 @@ function matchUID(entry: UIDEntry, query: string): boolean {
 }
 
 export default function Home() {
-  const { uids, batchFetch, deleteUID, toggleSaved, clearAllUIDs } = useUIDs();
+  const { uids, batchFetch, manualFetch, deleteUID, toggleSaved, clearAllUIDs } = useUIDs();
   const { prefs } = usePreferences();
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -47,33 +47,34 @@ export default function Home() {
   }, []);
 
   const handleBatchFetch = useCallback(async (items: UIDEntry[]) => {
-    if (items.length === 0) return;
+    const limited = items.slice(0, MAX_MANUAL_FETCH);
+    if (limited.length === 0) return;
     setFetchingIds(prev => {
       const next = new Set(prev);
-      for (const item of items) next.add(item.id);
+      for (const item of limited) next.add(item.id);
       return next;
     });
     try {
-      await batchFetch(items);
+      await manualFetch(limited);
     } finally {
       setFetchingIds(prev => {
         const next = new Set(prev);
-        for (const item of items) next.delete(item.id);
+        for (const item of limited) next.delete(item.id);
         return next;
       });
     }
-  }, [batchFetch]);
+  }, [manualFetch]);
 
   useEffect(() => {
     // Resume pending entries after async IndexedDB hydration or browser restart.
     // The module-level queue deduplicates requests from Import and Home.
     if (getFetchActivity() > 0) return;
     const pending = uids.filter(u => u.status === "pending" && !u.fetchedAt && !u.paused);
-    if (pending.length) void handleBatchFetch(pending);
-  }, [uids, handleBatchFetch]);
+    if (pending.length) void batchFetch(pending);
+  }, [uids, batchFetch]);
 
   useEffect(() => {
-    if (!prefs.autoRetry) return;
+    if (!prefs.autoRetry || getFetchPauseReason()) return;
     const failed = uids.filter(u => u.status === "error" && !fetchingIds.has(u.id));
     if (failed.length) void handleBatchFetch(failed);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -116,6 +117,15 @@ export default function Home() {
   const done = stats.success + stats.error;
   const progress = stats.total ? Math.round(done * 100 / stats.total) : 0;
   const active = fetchingIds.size > 0 || globalFetching > 0;
+  const restricted = uids.filter(u => u.paused && u.fetchError);
+  const pauseReason = getFetchPauseReason();
+  const pendingPaused = restricted.length;
+  const pauseMessages: Record<string, string> = {
+    rate_limited: "Facebook is limiting requests. Fetch stopped; no automatic retry.",
+    login_required: "Facebook requests a login or checkpoint. Confirm your authorized session before resuming.",
+    network_error: "Profile lookup connection failed. Fetch stopped instead of failing every UID.",
+    source_unavailable: "Public profile data is unavailable across several batches. Fetch stopped to preserve the remaining UIDs.",
+  };
 
   const handleFetchOne = useCallback((entry: UIDEntry) => { void handleBatchFetch([entry]); }, [handleBatchFetch]);
   const handleCardCheck = useCallback((id: string, checked: boolean) => {
@@ -143,6 +153,25 @@ export default function Home() {
 
   return (
     <div className="flex flex-col gap-3 px-3 py-3">
+      {pendingPaused > 0 && (
+        <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-3 text-sm" role="status" data-testid="fetch-pause-banner">
+          <div className="font-semibold text-amber-200">Fetching paused — {pendingPaused.toLocaleString()} UIDs preserved</div>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">
+            {pauseMessages[pauseReason || ""] || "Fetch stopped after a source error."}
+          </p>
+          <button
+            disabled={active}
+            className="mt-3 rounded-lg bg-[#24334c] border border-[#344761] px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
+            onClick={() => void handleBatchFetch(restricted.slice(0, MAX_MANUAL_FETCH))}
+            data-testid="button-resume-paused"
+          >
+            Retry next {Math.min(MAX_MANUAL_FETCH, pendingPaused)} paused
+          </button>
+          <p className="mt-1 text-[11px] text-[var(--text-muted)]">
+            Only resume when your session/network access is working. Automatic bulk retries stay disabled while blocked.
+          </p>
+        </div>
+      )}
       <section className="rounded-[22px] border border-card-border bg-gradient-to-b from-[#172336] to-[#0f1929] px-3.5 py-4 shadow-md" aria-label="Fetch status">
         <div className="flex items-center gap-3">
           <div className="flex-1 min-w-0">
@@ -159,13 +188,13 @@ export default function Home() {
             <button onClick={() => setShowPasswords(v => !v)} className={`rounded-xl p-2 transition-colors ${showPasswords ? "bg-[var(--primary)] text-white" : "bg-[var(--primary-dim)] text-[var(--primary)]"}`} title={showPasswords ? "Hide passwords" : "Show passwords"} aria-label={showPasswords ? "Hide passwords" : "Show passwords"}>
               {showPasswords ? <Eye className="h-5 w-5" /> : <EyeOff className="h-5 w-5" />}
             </button>
-            <button disabled={stats.error === 0 || active} onClick={() => void handleBatchFetch(uids.filter(u => u.status === "error"))} className="flex items-center gap-1 rounded-xl bg-[#24334c] px-2.5 py-2 text-xs font-mono text-[var(--text-primary)] disabled:opacity-50">
-              <RotateCw className={`h-4 w-4 ${active ? "animate-spin" : ""}`} /> Retry
+            <button disabled={stats.error === 0 || active} onClick={() => void handleBatchFetch(uids.filter(u => u.status === "error").slice(0, MAX_MANUAL_FETCH))} className="flex items-center gap-1 rounded-xl bg-[#24334c] px-2.5 py-2 text-xs font-mono text-[var(--text-primary)] disabled:opacity-50">
+              <RotateCw className={`h-4 w-4 ${active ? "animate-spin" : ""}`} /> Retry {Math.min(MAX_MANUAL_FETCH, stats.error)}
             </button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild><button aria-label="More actions" className="p-1 text-[var(--text-muted)]"><MoreHorizontal className="h-5 w-5" /></button></DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="bg-card text-[var(--text-primary)] border-card-border">
-                <DropdownMenuItem onClick={() => void handleBatchFetch(uids.filter(u => u.status === "pending"))}>Fetch pending</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => void handleBatchFetch(uids.filter(u => u.status === "pending").slice(0, MAX_MANUAL_FETCH))}>Fetch next {MAX_MANUAL_FETCH} pending</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setCheckedIds(new Set(pageUIDs.map(u => u.id)))}>Select this page</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setCheckedIds(new Set())}>Deselect all</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => copySelected(false)} disabled={!checkedIds.size}>Copy selected UIDs</DropdownMenuItem>
