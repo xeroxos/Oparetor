@@ -6,7 +6,7 @@ import { usePreferences } from "@/hooks/use-preferences";
 import { Input } from "@/components/ui/input";
 import { UIDCard } from "@/components/uid-card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { getUIDs, waitForUIDStorage, type UIDEntry } from "@/lib/storage";
+import { getUIDs, waitForUIDStorage, effectiveUIDStatus, type UIDEntry } from "@/lib/storage";
 import { copyText } from "@/lib/clipboard";
 
 type Filter = "all" | "success" | "error" | "pending";
@@ -71,7 +71,7 @@ export default function Home() {
     if (getFetchActivity() > 0) return;
     // Resume previously system-paused UIDs; still respect user opt-out on import.
     const pending = uids.filter(u =>
-      (u.retryQueued && u.status !== "success") ||
+      (u.retryQueued && effectiveUIDStatus(u) !== "success") ||
       (u.status === "pending" &&
         ((!u.paused && !u.fetchedAt) || (u.paused && Boolean(u.fetchError))))
     );
@@ -85,7 +85,7 @@ export default function Home() {
     // hydration and retried just 24 records, then appeared to stop.
     void waitForUIDStorage().then(() => {
       if (cancelled) return;
-      const failed = getUIDs().filter(u => u.status === "error");
+      const failed = getUIDs().filter(u => effectiveUIDStatus(u) === "error");
       if (failed.length) void manualFetch(failed);
     });
     return () => { cancelled = true; };
@@ -93,13 +93,13 @@ export default function Home() {
 
   const stats = useMemo(() => ({
     total: uids.length,
-    success: uids.filter(u => u.status === "success").length,
-    error: uids.filter(u => u.status === "error").length,
-    pending: uids.filter(u => u.status === "pending").length,
+    success: uids.filter(u => effectiveUIDStatus(u) === "success").length,
+    error: uids.filter(u => effectiveUIDStatus(u) === "error").length,
+    pending: uids.filter(u => effectiveUIDStatus(u) === "pending").length,
   }), [uids]);
 
   const filtered = useMemo(() => {
-    const rows = uids.filter(u => (filter === "all" || u.status === filter) && matchUID(u, search));
+    const rows = uids.filter(u => (filter === "all" || effectiveUIDStatus(u) === filter) && matchUID(u, search));
     if (sort === "uid") rows.sort((a, b) => a.uid.localeCompare(b.uid, undefined, { numeric: true }));
     else if (sort === "fetched") rows.sort((a, b) => (b.fetchedAt || "").localeCompare(a.fetchedAt || ""));
     return rows;
@@ -170,7 +170,7 @@ export default function Home() {
             <button onClick={() => setShowPasswords(v => !v)} className={`rounded-xl p-2 transition-colors ${showPasswords ? "bg-[var(--primary)] text-white" : "bg-[var(--primary-dim)] text-[var(--primary)]"}`} title={showPasswords ? "Hide passwords" : "Show passwords"} aria-label={showPasswords ? "Hide passwords" : "Show passwords"}>
               {showPasswords ? <Eye className="h-5 w-5" /> : <EyeOff className="h-5 w-5" />}
             </button>
-            <button disabled={stats.error === 0 || active} onClick={() => void handleBatchFetch(uids.filter(u => u.status === "error"))} className="flex items-center gap-1 rounded-xl bg-[#24334c] px-2.5 py-2 text-xs font-mono text-[var(--text-primary)] disabled:opacity-50">
+            <button disabled={stats.error === 0 || active} onClick={() => void handleBatchFetch(uids.filter(u => effectiveUIDStatus(u) === "error"))} className="flex items-center gap-1 rounded-xl bg-[#24334c] px-2.5 py-2 text-xs font-mono text-[var(--text-primary)] disabled:opacity-50">
               <RotateCw className={`h-4 w-4 ${active ? "animate-spin" : ""}`} /> Retry {stats.error.toLocaleString()}
             </button>
             <DropdownMenu>
