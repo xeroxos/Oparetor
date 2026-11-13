@@ -1,18 +1,32 @@
-import { Moon, Sun, Trash2, Database, Download, FileJson, FileText } from "lucide-react";
+import { useState } from "react";
+import { Moon, Sun, Trash2, Database, Download, FileJson, FileText, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { usePreferences } from "@/hooks/use-preferences";
 import { useUIDs } from "@/hooks/use-uids";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
-import { getUIDs, waitForUIDStorage } from "@/lib/storage";
+import { getUIDs, waitForUIDStorage, getFBCookie, saveFBCookie } from "@/lib/storage";
 
 export default function Settings() {
   const { prefs, updatePref } = usePreferences();
   const { uids, clearAllUIDs } = useUIDs();
   const { toast } = useToast();
+  const [fbCookie, setFBCookie] = useState(() => getFBCookie());
+  const [revealCookie, setRevealCookie] = useState(false);
+  const [cookieEdited, setCookieEdited] = useState(false);
+  const saveSession = () => {
+    saveFBCookie(fbCookie.trim());
+    setCookieEdited(false);
+    toast({
+      title: fbCookie.trim() ? "Session saved on this device" : "Session cleared",
+      description: "The session is used only for profile lookup requests; imported UID passwords are never sent.",
+    });
+  };
+
 
   const handleClearData = () => {
     if (confirm("সব UID ডিলিট হয়ে যাবে। নিশ্চিত?")) {
@@ -126,6 +140,44 @@ export default function Settings() {
                 Compact
               </Button>
             </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Legacy optional Facebook session; local browser only */}
+      <div className="space-y-2">
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pl-1">Profile fetching session</h3>
+        <Card className="bg-card">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
+              <ShieldCheck className="h-4 w-4 text-[var(--primary)]" />
+              Previous session-backed fetching mode
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Optional: enter a session for an account you own or are authorized to use.
+              The session goes to this app's Railway backend when you fetch profiles.
+              Keep it private and do not share it in chat. Without a valid session,
+              Facebook may display a login page and some profile details may be unavailable.
+            </p>
+            <div className="flex gap-2">
+              <Input type={revealCookie ? "text" : "password"}
+                value={fbCookie} autoComplete="off" autoCapitalize="none"
+                spellCheck={false} placeholder="Optional authorized session cookie"
+                aria-label="Optional Facebook session cookie"
+                onChange={e => { setFBCookie(e.target.value); setCookieEdited(true); }}
+                className="min-w-0 bg-background font-mono text-xs"
+                data-testid="fb-session-cookie" />
+              <Button type="button" size="sm" variant="outline"
+                onClick={() => setRevealCookie(v => !v)}>{revealCookie ? "Hide" : "Show"}</Button>
+            </div>
+            <div className="flex gap-2">
+              <Button type="button" size="sm" disabled={!cookieEdited}
+                onClick={saveSession} data-testid="save-fb-cookie">Save session</Button>
+              <Button type="button" size="sm" variant="outline"
+                onClick={() => { setFBCookie(""); saveFBCookie(""); setCookieEdited(false); }}
+                data-testid="clear-fb-cookie">Clear</Button>
+            </div>
+            <p className="text-xs text-muted-foreground">Session secrets are saved in this browser's local storage. Avoid shared devices. Clearing browser data removes them.</p>
           </CardContent>
         </Card>
       </div>

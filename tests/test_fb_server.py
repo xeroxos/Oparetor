@@ -28,7 +28,7 @@ class UIDOperatorAPITests(unittest.TestCase):
                 res = self.client.post("/api/fb/uid/fetch", json=payload)
                 self.assertEqual(res.status_code, 400)
 
-    def test_lookup_strips_credentials_and_uses_public_data_only(self):
+    def test_lookup_strips_uid_password_but_uses_opt_in_session(self):
         stub = {
             "status": "success", "name": "Test Person",
             "username": "testperson", "profile_pic": None,
@@ -45,7 +45,40 @@ class UIDOperatorAPITests(unittest.TestCase):
         self.assertNotIn("password", res.json["results"][0])
         self.assertNotIn("do-not-echo", res.get_data(as_text=True))
         self.assertNotIn("sensitive-cookie", res.get_data(as_text=True))
-        fetcher.assert_called_once_with("100000000000000", None)
+        fetcher.assert_called_once_with("100000000000000", {"sensitive-cookie": "not-allowed"})
+
+    def test_cookie_fallback_to_server_configuration(self):
+        stub = {"status": "error", "name": None, "username": None,
+                "profile_pic": None, "follower_count": None,
+                "has_instagram": False}
+        with patch.dict("os.environ", {"FB_DEFAULT_COOKIE": "c_user=12345; xs=abc"}, clear=False):
+            with patch("fb_server.fetch_uid_info", return_value=stub) as fetcher:
+                res = self.client.post("/api/fb/uid/fetch", json={
+                    "uids": [{"uid": "100000000000000"}],
+                })
+        self.assertEqual(res.status_code, 200)
+        fetcher.assert_called_once_with("100000000000000",
+                                        {"c_user": "12345", "xs": "abc"})
+
+    def test_rejects_malformed_and_excessive_cookie(self):
+        for invalid in [1, ["cookie=abc"], "a" * 8193]:
+            res = self.client.post("/api/fb/uid/fetch", json={
+                "uids": [{"uid": "100000000000000"}],
+                "cookie": invalid,
+            })
+            self.assertEqual(res.status_code, 400)
+
+    def test_old_mbasic_result_fallback_if_public_login_redirect(self):
+        from fb_server import fetch_uid_info
+        with patch("fb_server.get_public_info", return_value={}):
+            with patch("fb_server.get_followers_with_cookies", return_value={
+                "name": "Example Account", "profile_pic": "https://scontent.xx.fbcdn.net/example.jpg",
+                "follower_count": 1234,
+            }):
+                profile = fetch_uid_info("100000000000000", {"c_user": "example"})
+        self.assertEqual(profile["status"], "success")
+        self.assertEqual(profile["name"], "Example Account")
+        self.assertEqual(profile["follower_count"], 1234)
 
     def test_public_og_metadata_parser(self):
         page = (

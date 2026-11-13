@@ -36,10 +36,10 @@ CNAME `u` → `geewwsio.up.railway.app`. Record is **DNS-only**, not proxied. Ra
 Public profile lookup:
 - Only numeric UIDs of 5–25 digits; max 15 per API request.
 - Requests are processed through a bounded browser queue of 12 at a time.
-- Imported passwords and browser session cookies are never transmitted to the profile API.
+- Imported UID passwords are never transmitted to the profile API. If the user explicitly saves an authorized Facebook session in **Settings → Profile fetching session**, the session cookie is sent over HTTPS to this same-origin Railway backend only while fetching; it is used for the previous cookie-backed mbasic lookup and is never returned or logged. Avoid storing session cookies on a shared device.
 - Import can opt out of automatic lookup. Resume pending fetches after browser restart; failed entries can be manually retried.
 - Photo fetch starts with direct HTTPS FB CDN; if that is blocked, the same-origin proxy may be used.
-- Facebook may restrict or change public metadata access. The app does **not** guarantee the name, username, follower count, photo, or success for every UID, and does not bypass login restrictions.
+- Facebook may restrict or change metadata access. A valid authorized session may allow details available to the logged-in account, but the app cannot guarantee fetching or bypass account restrictions. Do not share session cookies in messages or logs.
 
 ## Release checklist
 

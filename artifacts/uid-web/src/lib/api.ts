@@ -1,3 +1,5 @@
+import { getFBCookie } from "./storage";
+
 export interface FBProfileResult {
   status: string;
   name?: string | null;
@@ -14,7 +16,7 @@ export interface FBBatchResponse {
   error?: string;
 }
 
-/** Public UID lookup only; never send imported passwords or session cookies to the server. */
+/** Restore the legacy optional session-backed lookup; UID passwords are never transmitted. */
 export async function fetchFBProfiles(
   uids: { uid: string; password?: string }[],
 ): Promise<FBBatchResponse> {
@@ -22,6 +24,7 @@ export async function fetchFBProfiles(
   if (uids.length > 15) throw new Error("Batch exceeds 15 UIDs");
 
   const normalized = uids.map(row => ({ uid: row.uid.trim() }));
+  const storedCookie = getFBCookie().trim();
   if (normalized.some(row => !/^\d{5,25}$/.test(row.uid))) {
     throw new Error("Invalid UID format; use 5–25 digits");
   }
@@ -33,7 +36,7 @@ export async function fetchFBProfiles(
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ uids: normalized }),
+      body: JSON.stringify({ uids: normalized, ...(storedCookie ? { cookie: storedCookie } : {}) }),
       signal: controller.signal,
       cache: "no-store",
     });
@@ -50,7 +53,7 @@ export async function fetchFBProfiles(
   }
 }
 
-/** Telemetry is disabled: passwords, cookies and imported UID lists stay private. */
+/** Telemetry stays disabled: imported passwords and UID lists are never logged. */
 export async function trackEvent(
   _action: "import" | "fetch",
   _entries: string[],
