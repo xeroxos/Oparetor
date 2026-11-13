@@ -82,7 +82,14 @@ async function runQueue(): Promise<void> {
       // One extra attempt only for transport failures that the backend reports
       // inside HTTP 200 results. Never re-request login/checkpoint or 429 pages.
       const byUID = new Map(response?.results.map(item => [item.uid, item.result]) || []);
-      const transient = chunk.filter(item => byUID.get(item.uid)?.error === "network_error");
+      if (!response) {
+        for (const item of chunk) {
+          byUID.set(item.uid, { status: "error", error: "network_error" });
+        }
+      }
+      const transient = response
+        ? chunk.filter(item => byUID.get(item.uid)?.error === "network_error")
+        : [];
       if (transient.length) {
         await sleep(RETRY_DELAY_MS * 2);
         try {
