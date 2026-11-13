@@ -68,6 +68,8 @@ function profileUpdate(item: UIDEntry, profile: FBProfileResult | undefined, now
 
 async function runQueue(): Promise<void> {
   let consecutiveRateLimits = 0;
+  let consecutiveEmptyBatches = 0;
+  let previousEmptyChunk: UIDEntry[] = [];
   while (queued.length > 0) {
     const chunk = queued.splice(0, CHUNK_SIZE);
     let upstreamBlocked = false;
@@ -116,16 +118,33 @@ async function runQueue(): Promise<void> {
         Boolean(profile.name || profile.username || profile.profile_pic)
       ).length;
       // Do not turn thousands of unrelated UIDs red if Facebook responds
-      // with login/checkpoint or explicit rate limit for a whole batch.
+      // with login/checkpoint, rate limit or empty public metadata for two batches.
       const accessBlocked = profiles.filter(
         (profile): profile is FBProfileResult =>
           Boolean(profile && UPSTREAM_ACCESS_ERRORS.has(profile.error || ""))
       );
-      upstreamBlocked = successes === 0 && accessBlocked.length >= Math.ceil(chunk.length / 2);
+      const emptyBatch = successes === 0 && profiles.every(p =>
+        !p || p.status !== "success"
+      );
+      consecutiveEmptyBatches = emptyBatch ? consecutiveEmptyBatches + 1 : 0;
+      const repeatedEmpty = consecutiveEmptyBatches >= 2;
+      upstreamBlocked = (successes === 0 && accessBlocked.length >= Math.ceil(chunk.length / 2))
+        || repeatedEmpty;
       if (upstreamBlocked) {
         upstreamReason = accessBlocked.some(p => p.error === "rate_limited")
-          ? "rate_limited" : "login_required";
+          ? "rate_limited"
+          : accessBlocked.some(p => p.error === "login_required")
+            ? "login_required" : "source_unavailable";
+        if (repeatedEmpty && previousEmptyChunk.length) {
+          const at = new Date().toISOString();
+          updateUIDs(previousEmptyChunk.map(item => ({
+            id: item.id,
+            status: hasFetchedProfileData(item) ? "success" as const : "pending" as const,
+            paused: false, retryQueued: false, fetchError: upstreamReason, fetchedAt: at,
+          })));
+        }
       }
+      previousEmptyChunk = emptyBatch ? chunk : [];
       const upstreamLimited = Array.from(byUID.values()).some(p => p.error === "rate_limited");
       consecutiveRateLimits = upstreamLimited ? consecutiveRateLimits + 1 : 0;
       const now = new Date().toISOString();
