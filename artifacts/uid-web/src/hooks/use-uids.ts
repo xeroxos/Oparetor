@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { getUIDs, updateUIDs, deleteUID, appendUIDs, toggleSaved, clearAllUIDs, type UIDEntry } from "@/lib/storage";
+import { getUIDs, updateUIDs, deleteUID, appendUIDs, toggleSaved, clearAllUIDs, hasFetchedProfileData, effectiveUIDStatus, type UIDEntry } from "@/lib/storage";
 import { fetchFBProfiles, type FBProfileResult } from "@/lib/api";
 
 // A single bounded fetch queue serves Import, Retry and individual cards.
@@ -33,17 +33,21 @@ export function getFetchActivity(): number {
 
 function profileUpdate(item: UIDEntry, profile: FBProfileResult | undefined, now: string) {
   if (!profile) {
+    const preserved = hasFetchedProfileData(item);
     return {
-      id: item.id, status: "error" as const, paused: false,
-      retryQueued: false, fetchError: "unavailable", fetchedAt: now,
+      id: item.id, status: preserved ? "success" as const : "error" as const,
+      paused: false, retryQueued: false,
+      fetchError: preserved ? undefined : "unavailable", fetchedAt: now,
     };
   }
   const picture = isSafePicture(profile.profile_pic) ? profile.profile_pic : undefined;
-  const success = profile.status === "success" && Boolean(profile.name || picture);
+  const success = profile.status === "success" && Boolean(profile.name || profile.username || picture);
   if (!success) {
+    const preserved = hasFetchedProfileData(item);
     return {
-      id: item.id, status: "error" as const, paused: false,
-      retryQueued: false, fetchError: profile.error || "unavailable", fetchedAt: now,
+      id: item.id, status: preserved ? "success" as const : "error" as const,
+      paused: false, retryQueued: false,
+      fetchError: preserved ? undefined : profile.error || "unavailable", fetchedAt: now,
     };
   }
   return {
@@ -150,7 +154,7 @@ export function fetchNewUIDs(items: UIDEntry[]): Promise<void> {
 
 /** Queue all selected Failed UIDs durably; CHUNK_SIZE bounds external requests. */
 export function resumeUIDFetch(items: UIDEntry[]): Promise<void> {
-  const eligible = items.filter(item => item.status !== "success" && /^\d{5,25}$/.test(item.uid));
+  const eligible = items.filter(item => effectiveUIDStatus(item) !== "success" && /^\d{5,25}$/.test(item.uid));
   if (eligible.length) {
     updateUIDs(eligible.map(item => ({ id: item.id, retryQueued: true })));
   }
