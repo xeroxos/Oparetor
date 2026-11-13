@@ -115,6 +115,8 @@ def get_public_info(uid: str) -> dict:
 
         # --- Name ---
         t = soup.find('title')
+        if t and re.search(r'log in|log into|sign up|create an account|checkpoint', t.get_text(strip=True), re.I):
+            return {}
         if t:
             candidate = re.sub(r'\s*\|\s*Facebook\s*$', '', t.get_text(strip=True)).strip()
             if candidate.lower() not in BAD_TITLES and len(candidate) > 1 and not re.search(r'log in|sign up|create an account|facebook helps', candidate, re.I):
