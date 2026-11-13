@@ -152,7 +152,7 @@ export default function Home() {
   ];
 
   return (
-    <div className="flex flex-col gap-3 px-3 py-3">
+    <div className="flex flex-col gap-2.5 px-2.5 py-2.5 sm:gap-3 sm:px-3 sm:py-3">
       {pendingPaused > 0 && (
         <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-3 text-sm" role="status" data-testid="fetch-pause-banner">
           <div className="font-semibold text-amber-200">Fetching paused — {pendingPaused.toLocaleString()} UIDs preserved</div>
@@ -172,7 +172,7 @@ export default function Home() {
           </p>
         </div>
       )}
-      <section className="rounded-[22px] border border-card-border bg-gradient-to-b from-[#172336] to-[#0f1929] px-3.5 py-4 shadow-md" aria-label="Fetch status">
+      <section className="rounded-[18px] sm:rounded-[22px] border border-card-border bg-gradient-to-b from-[#172336] to-[#0f1929] px-3 py-3 sm:px-3.5 sm:py-4 shadow-md" aria-label="Fetch status">
         <div className="flex items-center gap-3">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5 mb-2 text-[11px] font-mono">
@@ -205,9 +205,9 @@ export default function Home() {
             </DropdownMenu>
           </div>
         </div>
-        <div className="grid grid-cols-4 gap-1.5 border-t border-card-border mt-4 pt-3">
+        <div className="grid grid-cols-4 gap-1.5 border-t border-card-border mt-3 pt-2.5 sm:mt-4 sm:pt-3">
           {metrics.map(item => (
-            <button key={item.key} aria-pressed={filter === item.key} onClick={() => setFilter(item.key)} className={`rounded-[18px] border py-2.5 px-0.5 text-center min-w-0 ${filter === item.key ? "border-[var(--primary)] bg-[#203753] text-[var(--text-primary)]" : "border-[#243551] text-[var(--text-muted)]"}`}>
+            <button key={item.key} aria-pressed={filter === item.key} onClick={() => setFilter(item.key)} className={`rounded-[14px] sm:rounded-[18px] border py-2 px-0.5 sm:py-2.5 text-center min-w-0 ${filter === item.key ? "border-[var(--primary)] bg-[#203753] text-[var(--text-primary)]" : "border-[#243551] text-[var(--text-muted)]"}`}>
               <span className="block text-[11px] font-mono">{item.label}</span>
               <strong className="block text-[12px] font-mono tabular-nums">{item.count.toLocaleString()}</strong>
             </button>
@@ -217,7 +217,7 @@ export default function Home() {
 
       <div className="relative">
         <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--text-muted)]" />
-        <Input id="uid-operator-search" aria-label="UID Separator" placeholder="UID Separator — 61, 1000, 10000..." value={search} onChange={e => setSearch(e.target.value)} className="h-12 pl-10 rounded-[18px] bg-[#111c2e] border-[#22334e] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] font-mono text-sm" />
+        <Input id="uid-operator-search" aria-label="UID Separator" placeholder="UID Separator — 61, 1000, 10000..." value={search} onChange={e => setSearch(e.target.value)} className="h-10 sm:h-12 pl-10 rounded-[14px] sm:rounded-[18px] bg-[#111c2e] border-[#22334e] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] font-mono text-sm" />
       </div>
       <div className="flex items-center justify-between px-1 gap-2 text-[12px]">
         <span className="text-[var(--text-muted)] whitespace-nowrap">Showing <b className="text-[var(--text-primary)]">{filtered.length.toLocaleString()}</b> / {stats.total.toLocaleString()} UIDs</span>
@@ -229,7 +229,7 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="rounded-[19px] border border-[#243551] bg-[#111c2e] px-3 py-3 flex items-center justify-between gap-2 text-xs text-[var(--text-muted)]">
+      <div className="rounded-[14px] sm:rounded-[19px] border border-[#243551] bg-[#111c2e] px-2.5 py-2 sm:px-3 sm:py-3 flex items-center justify-between gap-2 text-xs text-[var(--text-muted)]">
         <span className="tabular-nums">{filtered.length ? `${(first + 1).toLocaleString()}–${Math.min(first + PAGE_SIZE, filtered.length).toLocaleString()} of ${filtered.length.toLocaleString()} · Page ${safePage}/${maxPages}` : "0 of 0 · Page 1/1"}</span>
         <div className="flex items-center gap-1">
           <button disabled={safePage === 1} onClick={() => setPage(v => Math.max(1, v - 1))} className="inline-flex items-center rounded-xl border border-card-border px-2.5 py-2 disabled:opacity-40"><ChevronLeft className="h-4 w-4" />Prev</button>
@@ -245,7 +245,7 @@ export default function Home() {
           {!stats.total && <Link href="/import" className="inline-flex items-center gap-2 bg-[var(--primary)] text-white px-4 py-2 rounded-xl mt-1"><Plus className="h-4 w-4" /> Import Now</Link>}
         </div>
       ) : (
-        <div className="flex flex-col gap-2.5 pb-6">
+        <div className="flex flex-col gap-2 pb-3 sm:gap-2.5 sm:pb-6">
           {renderedUIDs.map(entry => (
             <UIDCard key={entry.id} entry={entry} onToggleSaved={toggleSaved} onDelete={deleteUID} onFetch={handleFetchOne} showPassword={showPasswords} isFetching={fetchingIds.has(entry.id)} checked={checkedIds.has(entry.id)} onCheck={handleCardCheck} swipeToDelete={prefs.swipeToDelete} />
           ))}
