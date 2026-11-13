@@ -88,6 +88,9 @@ export default function Import() {
     try {
       const { records, rejected } = parseImport(input);
       if (!records.length) throw new Error("No valid numeric UIDs found");
+      if (!autoFetch) {
+        for (const row of records) if (row.status === "pending") row.paused = true;
+      }
       await waitForUIDStorage();
       const { added, saved } = appendUIDs(records);
       if (!saved) throw new Error("Browser storage unavailable/full; no records added.");
