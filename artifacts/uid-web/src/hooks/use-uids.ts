@@ -58,6 +58,7 @@ function profileUpdate(item: UIDEntry, profile: FBProfileResult | undefined, now
 }
 
 async function runQueue(): Promise<void> {
+  let consecutiveRateLimits = 0;
   while (queued.length > 0) {
     const chunk = queued.splice(0, CHUNK_SIZE);
     try {
@@ -79,6 +80,8 @@ async function runQueue(): Promise<void> {
       if (!response && lastError) console.warn("UID Operator batch request failed", lastError);
 
       const byUID = new Map(response?.results.map(item => [item.uid, item.result]) || []);
+      const upstreamLimited = response?.results.some(row => row.result.error === "rate_limited") || false;
+      consecutiveRateLimits = upstreamLimited ? consecutiveRateLimits + 1 : 0;
       const now = new Date().toISOString();
       updateUIDs(chunk.map(item => profileUpdate(item, byUID.get(item.uid), now)));
     } catch (error) {
@@ -94,7 +97,14 @@ async function runQueue(): Promise<void> {
       emitActivity();
     }
 
-    if (queued.length > 0) await sleep(BETWEEN_BATCHES_MS);
+    // No persistent "Fetching paused" state. Honor HTTP 429 with automatic
+    // increasing cooldown, then continue the bounded queue.
+    if (queued.length > 0) {
+      const backoff = consecutiveRateLimits
+        ? Math.min(300_000, 30_000 * 2 ** Math.min(4, consecutiveRateLimits - 1))
+        : BETWEEN_BATCHES_MS;
+      await sleep(backoff);
+    }
   }
 }
 
