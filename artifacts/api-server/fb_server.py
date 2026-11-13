@@ -137,7 +137,7 @@ def get_public_info(uid: str) -> dict:
         # --- Public follower count (only when exposed in page metadata) ---
         og_desc = soup.find('meta', property='og:description') or soup.find('meta', attrs={'name': 'description'})
         if og_desc and og_desc.get('content'):
-            match = re.search(r'([\\d,]+)\\s+followers', og_desc['content'], re.I)
+            match = re.search(r'([\d,]+)\s+followers', og_desc['content'], re.I)
             if match:
                 try:
                     result['follower_count'] = int(match.group(1).replace(',', ''))
