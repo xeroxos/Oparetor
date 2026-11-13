@@ -70,8 +70,11 @@ export default function Home() {
     // The module-level queue deduplicates requests from Import and Home.
     if (getFetchActivity() > 0) return;
     // Resume previously system-paused UIDs; still respect user opt-out on import.
-    const pending = uids.filter(u => u.status === "pending" &&
-      ((!u.paused && !u.fetchedAt) || (u.paused && Boolean(u.fetchError))));
+    const pending = uids.filter(u =>
+      (u.retryQueued && u.status !== "success") ||
+      (u.status === "pending" &&
+        ((!u.paused && !u.fetchedAt) || (u.paused && Boolean(u.fetchError))))
+    );
     if (pending.length) void batchFetch(pending);
   }, [uids, batchFetch]);
 
