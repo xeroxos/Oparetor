@@ -68,7 +68,7 @@ export default function Home() {
     // Resume pending entries after async IndexedDB hydration or browser restart.
     // The module-level queue deduplicates requests from Import and Home.
     if (getFetchActivity() > 0) return;
-    const pending = uids.filter(u => u.status === "pending" && !u.fetchedAt);
+    const pending = uids.filter(u => u.status === "pending" && !u.fetchedAt && !u.paused);
     if (pending.length) void handleBatchFetch(pending);
   }, [uids, handleBatchFetch]);
 
