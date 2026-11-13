@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useUIDs } from "@/hooks/use-uids";
 import { useToast } from "@/hooks/use-toast";
-import { waitForUIDStorage, type UIDEntry } from "@/lib/storage";
+import { waitForUIDStorage, flushUIDStorage, type UIDEntry } from "@/lib/storage";
 
 const MAX_IMPORT = 50_000;
 const UID_PATTERN = /^\d{5,25}$/;
@@ -94,6 +94,7 @@ export default function Import() {
       await waitForUIDStorage();
       const { added, saved } = appendUIDs(records);
       if (!saved) throw new Error("Browser storage unavailable/full; no records added.");
+      await flushUIDStorage();
       // The global queue persists beyond this page and never sends imported passwords.
       if (autoFetch) void batchFetch(records.filter(row => row.status === "pending"));
       toast({
