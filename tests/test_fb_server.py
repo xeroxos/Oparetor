@@ -78,17 +78,33 @@ class UIDOperatorAPITests(unittest.TestCase):
         self.assertEqual(len(res.json["results"]), 30)
         self.assertEqual(fetcher.call_count, 30)
 
-    def test_session_is_sent_to_primary_profile_lookup(self):
-        html = ('<html><head><title>Demo | Facebook</title>'
-                '<meta property="og:url" content="https://www.facebook.com/demo"/>'
-                '</head></html>')
-        fake = SimpleNamespace(status_code=200,
-                               url="https://m.facebook.com/profile.php?id=100000000000000",
-                               text=html)
+    def test_legacy_public_lookup_does_not_inherit_expired_session(self):
+        """Original working flow: m.facebook.com without cookies, mbasic with cookies."""
+        from fb_server import fetch_uid_info
+        primary = {"name": "Public Profile", "username": "public.user"}
+        mbasic = {"error": "login_required"}
+        with patch("fb_server.get_public_info", return_value=primary) as pub:
+            with patch("fb_server.get_followers_with_cookies", return_value=mbasic) as fallback:
+                result = fetch_uid_info("100000000000000", {"c_user": "expired"})
+        pub.assert_called_once_with("100000000000000")
+        fallback.assert_called_once_with("100000000000000", {"c_user": "expired"})
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["name"], "Public Profile")
+
+    def test_public_metadata_lookup_uses_tls_and_no_session(self):
+        """Legacy public profile lookup still rejects actual Facebook login walls."""
+        fake = SimpleNamespace(
+            status_code=200,
+            url="https://m.facebook.com/profile.php?id=100000000000000",
+            text='<title>Demo | Facebook</title>',
+        )
         with patch("fb_server.requests.get", return_value=fake) as getter:
-            result = get_public_info("100000000000000", {"c_user": "example"})
+            result = get_public_info("100000000000000")
         self.assertEqual(result["name"], "Demo")
-        self.assertEqual(getter.call_args.kwargs["cookies"], {"c_user": "example"})
+        kwargs = getter.call_args.kwargs
+        self.assertTrue(kwargs["verify"])
+        self.assertIsNone(kwargs["cookies"])
+        self.assertIn("m.facebook.com/profile.php", getter.call_args.args[0])
 
     def test_old_mbasic_result_fallback_if_public_login_redirect(self):
         from fb_server import fetch_uid_info

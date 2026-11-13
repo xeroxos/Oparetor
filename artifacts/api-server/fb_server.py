@@ -336,7 +336,11 @@ def fetch_uid_info(uid: str, extra_cookies: dict | None) -> dict:
 
     # Run public info + followers concurrently
     with ThreadPoolExecutor(max_workers=2) as inner:
-        fut_pub = inner.submit(get_public_info, uid, cookies or None)
+        # Restore the original successful path: public metadata must be read
+        # WITHOUT passing an account session. Stale cookies can redirect otherwise
+        # public pages to Facebook login/checkpoint pages.
+        fut_pub = inner.submit(get_public_info, uid)
+        # Only the optional mbasic follower fallback uses an authorized session.
         fut_mbasic = inner.submit(get_followers_with_cookies, uid, cookies) if cookies else None
 
         pub = fut_pub.result(timeout=20)

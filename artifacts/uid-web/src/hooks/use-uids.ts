@@ -35,7 +35,7 @@ function profileUpdate(item: UIDEntry, profile: FBProfileResult | undefined, now
   if (!profile) {
     return {
       id: item.id, status: "error" as const, paused: false,
-      fetchError: "unavailable", fetchedAt: now,
+      retryQueued: false, fetchError: "unavailable", fetchedAt: now,
     };
   }
   const picture = isSafePicture(profile.profile_pic) ? profile.profile_pic : undefined;
@@ -43,11 +43,11 @@ function profileUpdate(item: UIDEntry, profile: FBProfileResult | undefined, now
   if (!success) {
     return {
       id: item.id, status: "error" as const, paused: false,
-      fetchError: profile.error || "unavailable", fetchedAt: now,
+      retryQueued: false, fetchError: profile.error || "unavailable", fetchedAt: now,
     };
   }
   return {
-    id: item.id, status: "success" as const, paused: false, fetchError: undefined,
+    id: item.id, status: "success" as const, paused: false, retryQueued: false, fetchError: undefined,
     name: profile.name || item.name,
     username: profile.username || item.username,
     profilePic: picture || (isSafePicture(item.profilePic) ? item.profilePic : undefined),
@@ -79,8 +79,27 @@ async function runQueue(): Promise<void> {
       }
       if (!response && lastError) console.warn("UID Operator batch request failed", lastError);
 
+      // One extra attempt only for transport failures that the backend reports
+      // inside HTTP 200 results. Never re-request login/checkpoint or 429 pages.
       const byUID = new Map(response?.results.map(item => [item.uid, item.result]) || []);
-      const upstreamLimited = response?.results.some(row => row.result.error === "rate_limited") || false;
+      if (!response) {
+        for (const item of chunk) {
+          byUID.set(item.uid, { status: "error", error: "network_error" });
+        }
+      }
+      const transient = response
+        ? chunk.filter(item => byUID.get(item.uid)?.error === "network_error")
+        : [];
+      if (transient.length) {
+        await sleep(RETRY_DELAY_MS * 2);
+        try {
+          const retried = await fetchFBProfiles(transient.map(item => ({ uid: item.uid })));
+          for (const row of retried.results) byUID.set(row.uid, row.result);
+        } catch {
+          // Keep prior outcomes: next queued entries must not be lost.
+        }
+      }
+      const upstreamLimited = Array.from(byUID.values()).some(p => p.error === "rate_limited");
       consecutiveRateLimits = upstreamLimited ? consecutiveRateLimits + 1 : 0;
       const now = new Date().toISOString();
       updateUIDs(chunk.map(item => profileUpdate(item, byUID.get(item.uid), now)));
@@ -90,7 +109,7 @@ async function runQueue(): Promise<void> {
       const now = new Date().toISOString();
       updateUIDs(chunk.map(item => ({
         id: item.id, status: "error" as const, paused: false,
-        fetchError: "network_error", fetchedAt: now,
+        retryQueued: false, fetchError: "network_error", fetchedAt: now,
       })));
     } finally {
       for (const item of chunk) queuedIds.delete(item.id);
@@ -129,8 +148,13 @@ export function fetchNewUIDs(items: UIDEntry[]): Promise<void> {
   return enqueueFetch(items);
 }
 
+/** Queue all selected Failed UIDs durably; CHUNK_SIZE bounds external requests. */
 export function resumeUIDFetch(items: UIDEntry[]): Promise<void> {
-  return enqueueFetch(items.slice(0, MAX_MANUAL_FETCH));
+  const eligible = items.filter(item => item.status !== "success" && /^\d{5,25}$/.test(item.uid));
+  if (eligible.length) {
+    updateUIDs(eligible.map(item => ({ id: item.id, retryQueued: true })));
+  }
+  return enqueueFetch(eligible);
 }
 
 export function useUIDs() {

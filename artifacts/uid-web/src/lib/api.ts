@@ -30,7 +30,9 @@ export async function fetchFBProfiles(
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 42_000);
+  // Six UID requests may include a slow optional mbasic fallback. Keep client
+  // timeout below Gunicorn's 120s worker timeout to avoid false transport failures.
+  const timeout = setTimeout(() => controller.abort(), 80_000);
   try {
     const response = await fetch("/api/fb/uid/fetch", {
       method: "POST",
