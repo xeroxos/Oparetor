@@ -1,0 +1,8 @@
+FROM oven/bun:1.3.3-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=3000
+COPY railway-function/uid-operator-web.tsx ./index.tsx
+USER bun
+EXPOSE 3000
+CMD ["bun", "run", "index.tsx"]
