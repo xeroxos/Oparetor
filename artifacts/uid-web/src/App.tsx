@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { Switch, Route, Router as WouterRouter, Link, useLocation } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Home as HomeIcon, Upload, Star, Settings as SettingsIcon, Search, Fingerprint } from "lucide-react";
+import { Home as HomeIcon, Upload, Star, Settings as SettingsIcon, Search } from "lucide-react";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
@@ -17,12 +17,12 @@ const queryClient = new QueryClient();
 function AppHeader() {
   const [, setLocation] = useLocation();
   return (
-    <header className="app-header h-14 bg-card/90 border-b border-card-border flex items-center justify-between px-4 sticky top-0 z-20 shrink-0 backdrop-blur-xl">
+    <header className="app-header h-[74px] bg-card/90 border-b border-card-border flex items-center justify-between px-4 sticky top-0 z-20 shrink-0 backdrop-blur-xl">
       <div className="flex items-center gap-2.5">
         <div className="brand-mark" aria-hidden="true">
-          <Fingerprint className="w-4 h-4" />
+          <span className="h-3 w-3 rounded-full bg-white shadow-[0_0_12px_rgba(255,255,255,.95)]" />
         </div>
-        <h1 className="font-bold text-[17px] tracking-[-0.02em] text-[var(--text-primary)]">
+        <h1 className="font-bold text-[22px] tracking-[-0.02em] text-[var(--text-primary)]">
           UID <span className="text-[var(--primary)]">Operator</span>
         </h1>
       </div>

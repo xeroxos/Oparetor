@@ -12,7 +12,7 @@ STATIC_DIR = os.environ.get(
     "STATIC_DIR",
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uid-web", "dist", "public"),
 )
-app = Flask(__name__, static_folder=STATIC_DIR, static_url_path="")
+app = Flask(__name__, static_folder=None)
 CORS(app)
 
 from flask import Blueprint
