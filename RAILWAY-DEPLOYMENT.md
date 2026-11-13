@@ -1,45 +1,51 @@
-# UID Operator — Railway deployment
+# UID Operator — Railway + Cloudflare production
 
-The production app is built from this repository.
+Production: **https://u.xeroxvps.com**
 
-## Source and build
+Repository: `xeroxos/Oparetor` on `main`
+Railway project: `desirable-determination`; service: `uid-oparetor`; environment: `production`.
+Cloudflare zone: `xeroxvps.com`.
 
-- UI/API entrypoint: `railway-function/uid-operator-web.tsx` (Bun, zero npm runtime dependencies).
-- Image: `Dockerfile.railway`.
-- Railway build settings: `railway.json`.
-- Healthcheck: `GET /api/healthz` (expects HTTP 200 and JSON status=ok).
-- Listens on `0.0.0.0:$PORT` (default port 3000).
+## Runtime and source
 
-The original React/Flask monorepo remains in this repository. Its legacy `Dockerfile` and pnpm monorepo pipeline are **not** the currently deployed service. It failed during dependency installation. This standalone deployment avoids those build failures.
+The real mobile dashboard is **React/Vite** (`artifacts/uid-web`) served by **Flask/Gunicorn** (`artifacts/api-server/fb_server.py`). The old Bun-only UI under `railway-function/` is obsolete; **do not switch back**.
 
-## Railway deployment
+- Dockerfile: `Dockerfile.restore`
+- Railway config: `railway.json`
+- React frontend build: `pnpm --filter @workspace/uid-web run build`
+- React TypeScript check: `pnpm --filter @workspace/uid-web run typecheck`
+- Flask regression suite: `python -m unittest discover -s tests -p 'test_fb_server.py' -v`
+- Healthcheck: `GET /api/health` returns HTTP 200 and `{"status":"ok"}`
+- Frontend pages: `/`, `/import`, `/saved`, `/settings`
+- API endpoint: `POST /api/fb/uid/fetch` with `{"uids":[{"uid":"100000000000000"}]}`
 
-Railway project: `desirable-determination`, workspace `xeroxvps`.
-Service: `uid-oparetor`, environment: `production`.
-GitHub source: `xeroxos/Oparetor`, branch `main`.
-Railway-generated preview: https://uid-oparetor-production.up.railway.app/
+## Cloudflare DNS
 
-## Cloudflare custom domain
+CNAME `u` → `geewwsio.up.railway.app`. Record is **DNS-only**, not proxied. Railway owns the HTTPS certificate and custom domain verification.
 
-Production hostname: https://u.xeroxvps.com
+## Data and recovery
 
-Configure the `xeroxvps.com` Cloudflare zone:
+- UID entries (including optional passwords, names and photos) are **local to each browser profile** in IndexedDB. Existing `uid-operator-uids` localStorage data is migrated on first load without deleting it.
+- This does **not** synchronize data between devices, localhost, and `u.xeroxvps.com`. Browsers isolate storage by origin. No saved data from the prior `127.0.0.1:3000` is included automatically.
+- To move records from the old browser: copy or export the UID rows there, then open **Settings → Backup & Restore** or **Import** on the new domain and paste the `UID|password` rows, or select a JSON backup. Always keep a private backup before clearing data.
+- **Never share a JSON/TXT backup publicly**: exports can contain plaintext passwords.
+- PostgreSQL is running in the Railway project but not connected to the UID browser store. Do not represent it as server-side UID persistence.
 
-- CNAME record `u` to `geewwsio.up.railway.app`.
-- DNS-only (not proxied) to allow Railway's certificate/hostname validation.
-- Confirm Railway custom domain is verified and the TLS certificate is valid.
+## Fetch and retry
 
-## Data and privacy
+Public profile lookup:
+- Only numeric UIDs of 5–25 digits; max 15 per API request.
+- Requests are processed through a bounded browser queue of 12 at a time.
+- Imported passwords and browser session cookies are never transmitted to the profile API.
+- Import can opt out of automatic lookup. Resume pending fetches after browser restart; failed entries can be manually retried.
+- Photo fetch starts with direct HTTPS FB CDN; if that is blocked, the same-origin proxy may be used.
+- Facebook may restrict or change public metadata access. The app does **not** guarantee the name, username, follower count, photo, or success for every UID, and does not bypass login restrictions.
 
-- The web app stores imported UID and password records locally in the user's browser localStorage, not in the Railway database.
-- **No user records from Android Termux/127.0.0.1 are automatically migrated.**
-- Backend profile lookup accepts a numeric UID only; passwords are not sent in its API request.
-- A PostgreSQL service exists in the Railway project for future backend persistence, but the current Bun app **does not use it**.
-- The public profile lookup is best-effort and can fail if the social platform restricts access.
-- Avoid importing private credentials on untrusted/shared devices, and do not rely on browser localStorage as a durable backup.
+## Release checklist
 
-## Verification
-
-- `GET /`: returns responsive UID Operator HTML.
-- `GET /api/healthz`: returns `{"status":"ok","service":"uid-operator","version":"1.0.0"}`.
-- Test Import with synthetic UIDs and confirm counters and pagination; never use real passwords in staging/QA.
+1. Deploy to an isolated Railway staging service from a feature branch (do not replace `main` or the custom domain before QA).
+2. Confirm TypeScript compilation, Python compilation, 8+ mock-only backend tests, and `/api/health` pass.
+3. Exercise Import with synthetic UID rows and **Auto-fetch disabled**; verify counters, pagination, search, Saved and JSON export/restore, and persistence after reload.
+4. Merge tested code into `main`; deploy the production service.
+5. Verify Railway deployment status SUCCESS, Cloudflare custom domain VALID, health endpoint, and all React deep links.
+6. Remove only temporary staging resources; keep production PostgreSQL and user data intact.
