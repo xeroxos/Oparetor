@@ -402,13 +402,12 @@ def fetch_uids():
 
     def process_one(item):
         uid = str(item.get('uid', '')).strip()
-        password = item.get('password')
         if not uid:
             return None
 
         extra_cookies = global_cookies or None
         result = fetch_uid_info(uid, extra_cookies)
-        return {'uid': uid, 'password': password, 'result': result}
+        return {'uid': uid, 'result': result}
 
     results = []
     max_workers = min(20, max(1, len(uid_list)))
