@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { Link } from "wouter";
 import { Plus, Users, MoreHorizontal, RotateCw, Eye, EyeOff, ChevronLeft, ChevronRight, Hash } from "lucide-react";
-import { useUIDs, getFetchActivity, getFetchPauseReason, MAX_MANUAL_FETCH } from "@/hooks/use-uids";
+import { useUIDs, getFetchActivity, MAX_MANUAL_FETCH } from "@/hooks/use-uids";
 import { usePreferences } from "@/hooks/use-preferences";
 import { Input } from "@/components/ui/input";
 import { UIDCard } from "@/components/uid-card";
@@ -69,12 +69,14 @@ export default function Home() {
     // Resume pending entries after async IndexedDB hydration or browser restart.
     // The module-level queue deduplicates requests from Import and Home.
     if (getFetchActivity() > 0) return;
-    const pending = uids.filter(u => u.status === "pending" && !u.fetchedAt && !u.paused);
+    // Resume previously system-paused UIDs; still respect user opt-out on import.
+    const pending = uids.filter(u => u.status === "pending" &&
+      ((!u.paused && !u.fetchedAt) || (u.paused && Boolean(u.fetchError))));
     if (pending.length) void batchFetch(pending);
   }, [uids, batchFetch]);
 
   useEffect(() => {
-    if (!prefs.autoRetry || getFetchPauseReason()) return;
+    if (!prefs.autoRetry) return;
     const failed = uids.filter(u => u.status === "error" && !fetchingIds.has(u.id));
     if (failed.length) void handleBatchFetch(failed);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -117,16 +119,6 @@ export default function Home() {
   const done = stats.success + stats.error;
   const progress = stats.total ? Math.round(done * 100 / stats.total) : 0;
   const active = fetchingIds.size > 0 || globalFetching > 0;
-  const restricted = uids.filter(u => u.paused && u.fetchError);
-  const pauseReason = getFetchPauseReason();
-  const pendingPaused = restricted.length;
-  const pauseMessages: Record<string, string> = {
-    rate_limited: "Facebook is limiting requests. Fetch stopped; no automatic retry.",
-    login_required: "Facebook requests a login or checkpoint. Confirm your authorized session before resuming.",
-    network_error: "Profile lookup connection failed. Fetch stopped instead of failing every UID.",
-    source_unavailable: "Public profile data is unavailable across several batches. Fetch stopped to preserve the remaining UIDs.",
-  };
-
   const handleFetchOne = useCallback((entry: UIDEntry) => { void handleBatchFetch([entry]); }, [handleBatchFetch]);
   const handleCardCheck = useCallback((id: string, checked: boolean) => {
     setCheckedIds(prev => {
@@ -153,25 +145,6 @@ export default function Home() {
 
   return (
     <div className="flex flex-col gap-2.5 px-2.5 py-2.5 sm:gap-3 sm:px-3 sm:py-3">
-      {pendingPaused > 0 && (
-        <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 p-3 text-sm" role="status" data-testid="fetch-pause-banner">
-          <div className="font-semibold text-amber-200">Fetching paused — {pendingPaused.toLocaleString()} UIDs preserved</div>
-          <p className="mt-1 text-xs text-[var(--text-muted)]">
-            {pauseMessages[pauseReason || ""] || "Fetch stopped after a source error."}
-          </p>
-          <button
-            disabled={active}
-            className="mt-3 rounded-lg bg-[#24334c] border border-[#344761] px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
-            onClick={() => void handleBatchFetch(restricted.slice(0, MAX_MANUAL_FETCH))}
-            data-testid="button-resume-paused"
-          >
-            Retry next {Math.min(MAX_MANUAL_FETCH, pendingPaused)} paused
-          </button>
-          <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-            Only resume when your session/network access is working. Automatic bulk retries stay disabled while blocked.
-          </p>
-        </div>
-      )}
       <section className="rounded-[18px] sm:rounded-[22px] border border-card-border bg-gradient-to-b from-[#172336] to-[#0f1929] px-3 py-3 sm:px-3.5 sm:py-4 shadow-md" aria-label="Fetch status">
         <div className="flex items-center gap-3">
           <div className="flex-1 min-w-0">
