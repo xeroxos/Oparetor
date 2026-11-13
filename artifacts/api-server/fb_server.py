@@ -79,7 +79,7 @@ def _valid_fb_image(url: str) -> bool:
         return False
 
 
-def get_public_info(uid: str) -> dict:
+def get_public_info(uid: str, cookies: dict | None = None) -> dict:
     """
     Single m.facebook.com request → name + username + profile pic CDN URL.
     iPhone UA returns <title>=name, og:image=real CDN photo, og:url=username.
@@ -97,6 +97,7 @@ def get_public_info(uid: str) -> dict:
                 candidate = requests.get(
                     f"https://{host}/profile.php?id={uid}",
                     headers=IPHONE_HEADERS,
+                    cookies=cookies or None,
                     timeout=10,
                     allow_redirects=True,
                     verify=True,
@@ -321,7 +322,7 @@ def fetch_uid_info(uid: str, extra_cookies: dict | None) -> dict:
 
     # Run public info + followers concurrently
     with ThreadPoolExecutor(max_workers=2) as inner:
-        fut_pub = inner.submit(get_public_info, uid)
+        fut_pub = inner.submit(get_public_info, uid, cookies or None)
         fut_mbasic = inner.submit(get_followers_with_cookies, uid, cookies) if cookies else None
 
         pub = fut_pub.result(timeout=20)
@@ -435,8 +436,10 @@ def fetch_uids():
     uid_list = data['uids']
     if not isinstance(uid_list, list):
         return jsonify({'success': False, 'error': 'uids must be a list'}), 400
-    if not 1 <= len(uid_list) <= 15:
-        return jsonify({'success': False, 'error': 'Provide between 1 and 15 UIDs per request'}), 400
+    # Older already-open UI builds send 30 UIDs per request. Preserve compatibility
+    # while keeping backend outbound work bounded to ten concurrent workers.
+    if not 1 <= len(uid_list) <= 30:
+        return jsonify({'success': False, 'error': 'Provide between 1 and 30 UIDs per request'}), 400
     if any(not isinstance(row, dict) or not re.fullmatch(r'[0-9]{5,25}', str(row.get('uid', ''))) for row in uid_list):
         return jsonify({'success': False, 'error': 'Each UID must contain 5-25 digits'}), 400
 
