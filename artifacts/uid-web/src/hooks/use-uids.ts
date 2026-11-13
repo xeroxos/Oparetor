@@ -35,7 +35,7 @@ function profileUpdate(item: UIDEntry, profile: FBProfileResult | undefined, now
   if (!profile) {
     return {
       id: item.id, status: "error" as const, paused: false,
-      fetchError: "unavailable", fetchedAt: now,
+      retryQueued: false, fetchError: "unavailable", fetchedAt: now,
     };
   }
   const picture = isSafePicture(profile.profile_pic) ? profile.profile_pic : undefined;
@@ -43,11 +43,11 @@ function profileUpdate(item: UIDEntry, profile: FBProfileResult | undefined, now
   if (!success) {
     return {
       id: item.id, status: "error" as const, paused: false,
-      fetchError: profile.error || "unavailable", fetchedAt: now,
+      retryQueued: false, fetchError: profile.error || "unavailable", fetchedAt: now,
     };
   }
   return {
-    id: item.id, status: "success" as const, paused: false, fetchError: undefined,
+    id: item.id, status: "success" as const, paused: false, retryQueued: false, fetchError: undefined,
     name: profile.name || item.name,
     username: profile.username || item.username,
     profilePic: picture || (isSafePicture(item.profilePic) ? item.profilePic : undefined),
@@ -102,7 +102,7 @@ async function runQueue(): Promise<void> {
       const now = new Date().toISOString();
       updateUIDs(chunk.map(item => ({
         id: item.id, status: "error" as const, paused: false,
-        fetchError: "network_error", fetchedAt: now,
+        retryQueued: false, fetchError: "network_error", fetchedAt: now,
       })));
     } finally {
       for (const item of chunk) queuedIds.delete(item.id);
@@ -141,9 +141,13 @@ export function fetchNewUIDs(items: UIDEntry[]): Promise<void> {
   return enqueueFetch(items);
 }
 
-/** Queue every selected Failed UID; CHUNK_SIZE still bounds API work. */
+/** Queue all selected Failed UIDs durably; CHUNK_SIZE bounds external requests. */
 export function resumeUIDFetch(items: UIDEntry[]): Promise<void> {
-  return enqueueFetch(items);
+  const eligible = items.filter(item => item.status !== "success" && /^\d{5,25}$/.test(item.uid));
+  if (eligible.length) {
+    updateUIDs(eligible.map(item => ({ id: item.id, retryQueued: true })));
+  }
+  return enqueueFetch(eligible);
 }
 
 export function useUIDs() {
