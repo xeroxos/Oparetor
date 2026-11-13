@@ -27,6 +27,7 @@ function UIDCardImpl({
   onCheck,
   swipeToDelete = false,
 }: UIDCardProps) {
+  const [imageViaProxy, setImageViaProxy] = useState(false);
   const [copiedUID, setCopiedUID] = useState(false);
   const [copiedPass, setCopiedPass] = useState(false);
   const [copiedUser, setCopiedUser] = useState(false);
@@ -63,6 +64,10 @@ function UIDCardImpl({
 
   const avatarURL = entry.profilePic && /^https:\/\//i.test(entry.profilePic)
     ? entry.profilePic : undefined;
+  useEffect(() => { setImageViaProxy(false); }, [entry.profilePic]);
+  const imageSource = avatarURL
+    ? (imageViaProxy ? "/api/fb/proxy/pic/" + encodeURIComponent(entry.uid) : avatarURL)
+    : undefined;
 
   const initials = entry.name
     ? entry.name.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase()
@@ -139,7 +144,7 @@ function UIDCardImpl({
 
         {/* Avatar */}
         <Avatar className="w-[72px] h-[96px] border-2 border-[#27a6ec] shrink-0 rounded-[17px]">
-          <AvatarImage src={avatarURL} alt={entry.name || entry.uid} className="object-cover" loading="lazy" />
+          <AvatarImage src={imageSource} alt={entry.name || entry.uid} className="object-cover" loading="lazy" referrerPolicy="no-referrer" onError={() => { if (!imageViaProxy && avatarURL) setImageViaProxy(true); }} />
           <AvatarFallback className="text-sm font-mono font-bold text-[var(--text-muted)] bg-background rounded-xl">
             {initials}
           </AvatarFallback>
