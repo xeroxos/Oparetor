@@ -362,6 +362,8 @@ def proxy_pic(uid: str):
     Serves from in-memory CDN cache (pre-warmed during batch fetch) — instant.
     Falls back to fresh og:image fetch if cache miss.
     """
+    if not re.fullmatch(r'[0-9]{5,25}', uid):
+        return jsonify({'error': 'Invalid UID'}), 400
     # 1. Check in-memory cache first (pre-warmed during /uid/fetch)
     cdn_url = _get_cached_cdn(uid)
 
@@ -385,7 +387,9 @@ def proxy_pic(uid: str):
             _cdn_cache.pop(uid, None)
             return jsonify({'error': 'CDN fetch failed'}), 502
 
-        content_type = img_resp.headers.get('Content-Type', 'image/jpeg')
+        content_type = img_resp.headers.get('Content-Type', '')
+        if not content_type.lower().startswith('image/'):
+            return jsonify({'error': 'CDN response is not an image'}), 502
 
         def generate():
             for chunk in img_resp.iter_content(chunk_size=8192):
