@@ -19,7 +19,7 @@ class UIDOperatorAPITests(unittest.TestCase):
         bad_payloads = [
             {}, {"uids": []}, {"uids": "12345678901"},
             {"uids": [{"uid": "not-an-id"}]},
-            {"uids": [{"uid": "12345678901"}] * 16},
+            {"uids": [{"uid": "12345678901"}] * 31},
             {"uids": [{"uid": "12"}]},
             {"uids": [{"uid": "12345678901"}, "wrong"]},
         ]
