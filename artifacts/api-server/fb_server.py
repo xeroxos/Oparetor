@@ -1,5 +1,4 @@
 from flask import Flask, request, jsonify, Response, stream_with_context, send_from_directory
-from flask_cors import CORS
 import re
 import requests
 import httpx
@@ -13,7 +12,7 @@ STATIC_DIR = os.environ.get(
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uid-web", "dist", "public"),
 )
 app = Flask(__name__, static_folder=None)
-CORS(app)
+app.config['MAX_CONTENT_LENGTH'] = 128 * 1024  # reject oversized API payloads
 
 from flask import Blueprint
 
@@ -82,12 +81,12 @@ def get_public_info(uid: str) -> dict:
             f"https://m.facebook.com/profile.php?id={uid}",
             headers=IPHONE_HEADERS,
             timeout=12,
-            verify=False,
             allow_redirects=True,
         )
         if r.status_code != 200:
             return {}
-
+        if ('login' in r.url or 'checkpoint' in r.url):
+            return {}
         soup = BeautifulSoup(r.text, 'html.parser')
         result: dict = {}
 
@@ -95,11 +94,11 @@ def get_public_info(uid: str) -> dict:
         t = soup.find('title')
         if t:
             candidate = re.sub(r'\s*\|\s*Facebook\s*$', '', t.get_text(strip=True)).strip()
-            if candidate.lower() not in BAD_TITLES and len(candidate) > 1:
+            if candidate.lower() not in BAD_TITLES and len(candidate) > 1 and not re.search(r'log in|sign up|create an account|facebook helps', candidate, re.I):
                 result['name'] = candidate
         if not result.get('name'):
             og_title = soup.find('meta', property='og:title')
-            if og_title and og_title.get('content', '').strip().lower() not in BAD_TITLES:
+            if og_title and og_title.get('content', '').strip().lower() not in BAD_TITLES and not re.search(r'log in|sign up|create an account', og_title.get('content', ''), re.I):
                 result['name'] = og_title['content'].strip()
 
         # --- Profile pic CDN URL (og:image) ---
@@ -258,7 +257,6 @@ def check_instagram(username: str) -> bool:
             },
             timeout=6,
             allow_redirects=True,
-            verify=False,
         )
         return r.status_code == 200
     except Exception:
@@ -303,7 +301,7 @@ def fetch_uid_info(uid: str, extra_cookies: dict | None) -> dict:
         result['profile_pic'] = cdn_pic
     else:
         # Fallback: proxy URL (browser → Express → Flask → CDN)
-        result['profile_pic'] = f"/fb-api/proxy/pic/{uid}"
+        result['profile_pic'] = None  # never return a broken HTML SPA path as an image
 
     # Follower count
     if mbasic.get('follower_count') is not None:
@@ -314,7 +312,7 @@ def fetch_uid_info(uid: str, extra_cookies: dict | None) -> dict:
         result['status'] = 'success'
 
     # Instagram check (only if we have a username)
-    if result.get('username'):
+    if os.environ.get('ENABLE_INSTAGRAM_CHECK', 'false').lower() == 'true' and result.get('username'):
         result['has_instagram'] = check_instagram(result['username'])
 
     return result
@@ -343,7 +341,6 @@ def proxy_pic(uid: str):
             cdn_url,
             headers={'User-Agent': FBOT_UA, 'Referer': 'https://www.facebook.com/'},
             timeout=12,
-            verify=False,
             stream=True,
         )
         if img_resp.status_code != 200:
@@ -395,9 +392,13 @@ def fetch_uids():
     uid_list = data['uids']
     if not isinstance(uid_list, list):
         return jsonify({'success': False, 'error': 'uids must be a list'}), 400
+    if not 1 <= len(uid_list) <= 15:
+        return jsonify({'success': False, 'error': 'Provide between 1 and 15 UIDs per request'}), 400
+    if any(not isinstance(row, dict) or not re.fullmatch(r'[0-9]{5,25}', str(row.get('uid', ''))) for row in uid_list):
+        return jsonify({'success': False, 'error': 'Each UID must contain 5-25 digits'}), 400
 
     # Read cookie fresh at request time — no restart needed after env var update
-    cookie_str = data.get('cookie', '') or os.environ.get("FB_DEFAULT_COOKIE", "")
+    cookie_str = os.environ.get('FB_DEFAULT_COOKIE', '')  # no browser session cookies accepted
     global_cookies = parse_cookies(cookie_str)
 
     def process_one(item):
@@ -410,7 +411,7 @@ def fetch_uids():
         return {'uid': uid, 'result': result}
 
     results = []
-    max_workers = min(20, max(1, len(uid_list)))
+    max_workers = min(6, len(uid_list))
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = [pool.submit(process_one, item) for item in uid_list]
         for fut in as_completed(futures):
@@ -456,6 +457,8 @@ def get_profile():
 
     m = re.search(r'(?:profile\.php\?id=|facebook\.com/)([^/?&]+)', url)
     uid = m.group(1) if m else ''
+    if not re.fullmatch(r'[0-9]{5,25}', uid):
+        return jsonify({"status": "error", "message": "Invalid numeric UID"}), 400
     result = fetch_uid_info(uid, None)
     return jsonify({"success": True, "data": result, "timestamp": datetime.now().isoformat()})
 
@@ -488,7 +491,7 @@ def root():
 
 @app.route('/<path:path>', methods=['GET'])
 def serve_frontend(path):
-    if path.startswith('api/'):
+    if path.startswith(('api/', 'fb-api/')):
         return jsonify({"success": False, "error": "Endpoint not found"}), 404
     requested = os.path.join(STATIC_DIR, path)
     if os.path.isfile(requested):
