@@ -192,6 +192,120 @@ body {
   }
 }
 
+/* Screen-size corrections: respect mobile zoom, keyboard and Android safe-area UI. */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+#root {
+  min-width: 0;
+  width: 100%;
+}
+.app-main {
+  padding-bottom: calc(4.25rem + 12px + env(safe-area-inset-bottom, 0px));
+}
+
+@media (max-width: 639px) {
+  .app-shell {
+    max-width: 100%;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .brand-mark {
+    width: 36px;
+    height: 36px;
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--primary) 27%, transparent);
+  }
+
+  .header-action {
+    width: 40px;
+    height: 40px;
+    border-radius: 14px;
+  }
+
+  .bottom-nav {
+    height: calc(3.75rem + env(safe-area-inset-bottom, 0px));
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .nav-item {
+    height: 3.75rem;
+    min-width: 0;
+  }
+  .nav-icon {
+    width: 34px;
+    height: 26px;
+  }
+  .app-main {
+    padding-bottom: calc(3.75rem + 12px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Layout stays within the viewport even with 15+ digit UIDs. */
+  .uid-card {
+    min-width: 0;
+    border-radius: 16px;
+  }
+  .uid-card-inner {
+    align-items: flex-start;
+  }
+  .uid-card-content {
+    gap: 3px;
+    min-width: 0;
+  }
+  .uid-card-avatar {
+    width: 60px;
+    height: 78px;
+    border-radius: 13px;
+  }
+  .uid-card-titlebar {
+    min-width: 0;
+  }
+  .uid-card-name {
+    min-width: 0;
+    line-height: 1.25;
+  }
+  .uid-card-actions {
+    gap: 2px;
+  }
+  .uid-card-actions > button,
+  .uid-card-actions > div > button {
+    min-width: 23px;
+    min-height: 23px;
+    display: grid;
+    place-items: center;
+  }
+  .uid-card-info-row {
+    min-width: 0;
+    min-height: 23px;
+  }
+  .uid-card-copy {
+    width: 27px;
+    height: 27px;
+    display: grid;
+    place-items: center;
+  }
+  .uid-card-username {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 359px) {
+  .uid-card-avatar {
+    width: 52px;
+    height: 70px;
+  }
+  .uid-card-inner {
+    gap: 6px;
+    padding: 8px;
+  }
+  .uid-card-actions {
+    gap: 0;
+  }
+  .uid-card-content {
+    gap: 2px;
+  }
+}
+
 .ig-gradient {
   background: linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888);
   -webkit-background-clip: text;
