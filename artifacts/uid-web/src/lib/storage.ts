@@ -13,6 +13,8 @@ export interface UIDEntry {
   reInput?: boolean;
   paused?: boolean;
   fetchError?: string;
+  /** Retry requested by the user; survives mobile tab reloads. */
+  retryQueued?: boolean;
 }
 
 export interface AppPreferences {
