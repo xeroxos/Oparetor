@@ -29,7 +29,7 @@ function isSafePicture(value: string | null | undefined): value is string {
 async function runQueue(): Promise<void> {
   while (queued.length) {
     const chunk = queued.splice(0, CHUNK_SIZE);
-    updateUIDs(chunk.map(item => ({ id: item.id, status: "pending" as const })));
+    updateUIDs(chunk.map(item => ({ id: item.id, status: "pending" as const, paused: false })));
     let response: Awaited<ReturnType<typeof fetchFBProfiles>> | null = null;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
