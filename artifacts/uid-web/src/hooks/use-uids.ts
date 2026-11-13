@@ -7,6 +7,7 @@ import { fetchFBProfiles, type FBProfileResult } from "@/lib/api";
 const CHUNK_SIZE = 6;
 const BETWEEN_BATCHES_MS = 1100;
 const RETRY_DELAY_MS = 1700;
+const UPSTREAM_ACCESS_ERRORS = new Set(["login_required", "rate_limited"]);
 export const MAX_MANUAL_FETCH = 24;
 
 const queued: UIDEntry[] = [];
@@ -35,17 +36,21 @@ function profileUpdate(item: UIDEntry, profile: FBProfileResult | undefined, now
   if (!profile) {
     const preserved = hasFetchedProfileData(item);
     return {
-      id: item.id, status: preserved ? "success" as const : "error" as const,
+      id: item.id, status: preserved ? "success" as const : "pending" as const,
       paused: false, retryQueued: false,
-      fetchError: preserved ? undefined : "unavailable", fetchedAt: now,
+      fetchError: preserved ? undefined : "network_error", fetchedAt: now,
     };
   }
   const picture = isSafePicture(profile.profile_pic) ? profile.profile_pic : undefined;
   const success = profile.status === "success" && Boolean(profile.name || profile.username || picture);
   if (!success) {
     const preserved = hasFetchedProfileData(item);
+    const sourceUnavailable = ["login_required", "rate_limited", "network_error"].includes(profile.error || "");
     return {
-      id: item.id, status: preserved ? "success" as const : "error" as const,
+      id: item.id,
+      // An upstream login wall or service failure is NOT a bad UID. Keep it
+      // pending; existing verified profile data always stays successful.
+      status: preserved ? "success" as const : sourceUnavailable ? "pending" as const : "error" as const,
       paused: false, retryQueued: false,
       fetchError: preserved ? undefined : profile.error || "unavailable", fetchedAt: now,
     };
@@ -65,6 +70,8 @@ async function runQueue(): Promise<void> {
   let consecutiveRateLimits = 0;
   while (queued.length > 0) {
     const chunk = queued.splice(0, CHUNK_SIZE);
+    let upstreamBlocked = false;
+    let upstreamReason = "source_unavailable";
     try {
       updateUIDs(chunk.map(item => ({
         id: item.id, status: "pending" as const, paused: false, fetchError: undefined,
@@ -103,6 +110,21 @@ async function runQueue(): Promise<void> {
           // Keep prior outcomes: next queued entries must not be lost.
         }
       }
+      const profiles = chunk.map(item => byUID.get(item.uid));
+      const successes = profiles.filter(profile =>
+        profile?.status === "success" &&
+        Boolean(profile.name || profile.username || profile.profile_pic)
+      ).length;
+      // Do not turn thousands of unrelated UIDs red if Facebook responds
+      // with login/checkpoint or explicit rate limit for a whole batch.
+      const accessBlocked = profiles.filter(profile =>
+        profile && UPSTREAM_ACCESS_ERRORS.has(profile.error || "")
+      );
+      upstreamBlocked = successes === 0 && accessBlocked.length >= Math.ceil(chunk.length / 2);
+      if (upstreamBlocked) {
+        upstreamReason = accessBlocked.some(p => p.error === "rate_limited")
+          ? "rate_limited" : "login_required";
+      }
       const upstreamLimited = Array.from(byUID.values()).some(p => p.error === "rate_limited");
       consecutiveRateLimits = upstreamLimited ? consecutiveRateLimits + 1 : 0;
       const now = new Date().toISOString();
@@ -120,8 +142,28 @@ async function runQueue(): Promise<void> {
       emitActivity();
     }
 
-    // No persistent "Fetching paused" state. Honor HTTP 429 with automatic
-    // increasing cooldown, then continue the bounded queue.
+    if (upstreamBlocked) {
+      // No persistent paused flag or warning banner; preserve the unprocessed
+      // queue as Pending and allow an explicit retry after provider access
+      // recovers. Avoid hammering login/checkpoint pages.
+      const untouched = queued.splice(0);
+      if (untouched.length) {
+        const at = new Date().toISOString();
+        updateUIDs(untouched.map(item => ({
+          id: item.id,
+          status: hasFetchedProfileData(item) ? "success" as const : "pending" as const,
+          paused: false,
+          retryQueued: false,
+          fetchError: upstreamReason,
+          fetchedAt: at,
+        })));
+        for (const item of untouched) queuedIds.delete(item.id);
+        emitActivity();
+      }
+      break;
+    }
+
+    // Honor HTTP 429 with increasing cooldown, without a global pause banner.
     if (queued.length > 0) {
       const backoff = consecutiveRateLimits
         ? Math.min(300_000, 30_000 * 2 ** Math.min(4, consecutiveRateLimits - 1))
