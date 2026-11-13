@@ -503,17 +503,25 @@ def fetch_uids():
                     'result': {'status': 'error', 'error': 'network_error'}
                 })
 
+    diagnostics = {
+        'success': sum(1 for item in results if item['result'].get('status') == 'success'),
+        'limited': sum(1 for item in results if item['result'].get('error') == 'rate_limited'),
+        'login_required': sum(1 for item in results if item['result'].get('error') == 'login_required'),
+        'unavailable': sum(1 for item in results if item['result'].get('error') == 'unavailable'),
+        'network_error': sum(1 for item in results if item['result'].get('error') == 'network_error'),
+    }
+    # Aggregate outcome counts only. Never log UIDs, passwords, or sessions.
+    app.logger.info(
+        'uid_fetch_batch total=%d success=%d login=%d limited=%d network=%d unavailable=%d',
+        len(results), diagnostics['success'], diagnostics['login_required'],
+        diagnostics['limited'], diagnostics['network_error'], diagnostics['unavailable'],
+    )
     return jsonify({
         'success': True,
         'results': results,
         'total': len(results),
         'timestamp': datetime.now().isoformat(),
-        'diagnostics': {
-            'success': sum(1 for item in results if item['result'].get('status') == 'success'),
-            'limited': sum(1 for item in results if item['result'].get('error') == 'rate_limited'),
-            'login_required': sum(1 for item in results if item['result'].get('error') == 'login_required'),
-            'unavailable': sum(1 for item in results if item['result'].get('error') == 'unavailable'),
-        },
+        'diagnostics': diagnostics,
     })
 
 
