@@ -18,5 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY artifacts/api-server/fb_server.py ./fb_server.py
 RUN python -m py_compile ./fb_server.py
 COPY --from=web-build /app/artifacts/uid-web/dist/public ./static
+COPY tests/test_fb_server.py ./tests/test_fb_server.py
+RUN python -m unittest discover -s tests -p 'test_fb_server.py' -v
 EXPOSE 3000
 CMD ["sh","-c","exec gunicorn --workers 1 --threads 8 --timeout 120 --bind 0.0.0.0:${PORT:-3000} fb_server:app"]
