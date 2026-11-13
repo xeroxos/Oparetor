@@ -148,11 +148,17 @@ async function initializeDatabase(): Promise<void> {
     const db = await openDatabase();
     const stored = await dbRead(db);
     const base = stored.initialized ? stored.rows : initialLegacy;
-    const changes = pendingChanges;
-    pendingChanges = [];
+    const changes = pendingChanges.splice(0);
     let rows = base;
     for (const change of changes) rows = change(rows);
     if (!stored.initialized || changes.length) await replaceDatabase(db, rows);
+    // A large legacy migration can take seconds; mutations during it must be replayed,
+    // never overwritten when hydration completes.
+    while (pendingChanges.length) {
+      const lateChanges = pendingChanges.splice(0);
+      for (const change of lateChanges) rows = change(rows);
+      await replaceDatabase(db, rows);
+    }
     database = db;
     dbAvailable = true;
     storageReady = true;
@@ -258,6 +264,11 @@ export function savePreferences(prefs: Partial<AppPreferences>): void {
   const current = getPreferences();
   try { localStorage.setItem(PREFS_KEY, JSON.stringify({ ...current, ...prefs })); } catch { /* fallback */ }
   window.dispatchEvent(new Event("prefs-updated"));
+}
+
+export async function flushUIDStorage(): Promise<void> {
+  await waitForUIDStorage();
+  await writeQueue;
 }
 
 export async function waitForUIDStorage(): Promise<void> {
