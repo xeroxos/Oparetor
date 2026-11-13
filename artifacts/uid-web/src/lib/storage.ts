@@ -25,9 +25,9 @@ export function hasFetchedProfileData(row: Pick<UIDEntry, "uid" | "name" | "user
   const name = typeof row.name === "string" ? row.name.trim() : "";
   const username = typeof row.username === "string" ? row.username.trim() : "";
   const realName = Boolean(name && name !== row.uid &&
-    !/^(?:facebook|error|unknown|log\\s*in(?:\\s*to\\s*facebook)?|login|sign\\s*up|create\\s*an\\s*account)$/i.test(name));
+    !/^(?:facebook|error|unknown|log\s*in(?:\s*to\s*facebook)?|login|sign\s*up|create\s*an\s*account)$/i.test(name));
   const realUsername = Boolean(username && username !== row.uid &&
-    !/^(?:facebook|login|profile\\.php|error|unknown)$/i.test(username));
+    !/^(?:facebook|login|profile\.php|error|unknown)$/i.test(username));
   let realPhoto = false;
   if (typeof row.profilePic === "string" && row.profilePic.length < 4096) {
     try {
