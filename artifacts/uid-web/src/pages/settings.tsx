@@ -38,11 +38,12 @@ export default function Settings() {
       toast({ title: "No UIDs to export" });
       return;
     }
+    if (records.some(row => row.password) &&
+        !confirm("This backup contains plaintext passwords. Save it only to a private device?")) return;
     if (format === "json") {
       download("uid-operator-backup-" + new Date().toISOString().slice(0, 10) + ".json",
         JSON.stringify(records, null, 2), "application/json");
     } else {
-      if (!confirm("This text file includes plaintext passwords. Save it privately?")) return;
       download("uid-operator-" + new Date().toISOString().slice(0, 10) + ".txt",
         records.map(row => row.uid + (row.password ? "|" + row.password : "")).join("\n"), "text/plain");
     }
