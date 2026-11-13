@@ -68,6 +68,28 @@ class UIDOperatorAPITests(unittest.TestCase):
             })
             self.assertEqual(res.status_code, 400)
 
+    def test_legacy_30_uid_batch_accepted_without_network(self):
+        stub = {"status": "success", "name": "Demo", "username": "demo",
+                "profile_pic": None, "follower_count": 0, "has_instagram": False}
+        uids = [{"uid": "100" + str(i).zfill(12)} for i in range(30)]
+        with patch("fb_server.fetch_uid_info", return_value=stub) as fetcher:
+            res = self.client.post("/api/fb/uid/fetch", json={"uids": uids})
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(len(res.json["results"]), 30)
+        self.assertEqual(fetcher.call_count, 30)
+
+    def test_session_is_sent_to_primary_profile_lookup(self):
+        html = ('<html><head><title>Demo | Facebook</title>'
+                '<meta property="og:url" content="https://www.facebook.com/demo"/>'
+                '</head></html>')
+        fake = SimpleNamespace(status_code=200,
+                               url="https://m.facebook.com/profile.php?id=100000000000000",
+                               text=html)
+        with patch("fb_server.requests.get", return_value=fake) as getter:
+            result = get_public_info("100000000000000", {"c_user": "example"})
+        self.assertEqual(result["name"], "Demo")
+        self.assertEqual(getter.call_args.kwargs["cookies"], {"c_user": "example"})
+
     def test_old_mbasic_result_fallback_if_public_login_redirect(self):
         from fb_server import fetch_uid_info
         with patch("fb_server.get_public_info", return_value={}):
