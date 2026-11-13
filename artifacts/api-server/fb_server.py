@@ -484,16 +484,24 @@ def fetch_uids():
         return {'uid': uid, 'result': result}
 
     results = []
-    max_workers = min(10, len(uid_list))
+    # Limit simultaneous upstream requests when processing repeated large imports.
+    # A failed worker must never silently drop a UID from the response.
+    max_workers = min(3, len(uid_list))
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = [pool.submit(process_one, item) for item in uid_list]
+        futures = {
+            pool.submit(process_one, item): str(item['uid'])
+            for item in uid_list
+        }
         for fut in as_completed(futures):
             try:
-                r = fut.result(timeout=25)
+                r = fut.result()
                 if r is not None:
                     results.append(r)
             except Exception:
-                pass
+                results.append({
+                    'uid': futures[fut],
+                    'result': {'status': 'error', 'error': 'network_error'}
+                })
 
     return jsonify({
         'success': True,
