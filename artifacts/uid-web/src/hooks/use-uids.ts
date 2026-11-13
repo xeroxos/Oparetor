@@ -76,9 +76,11 @@ function profileUpdate(item: UIDEntry, profile: FBProfileResult | undefined, now
 
 async function runQueue(): Promise<void> {
   let consecutiveEmptyBatches = 0;
+  let inFlight: UIDEntry[] = [];
   try {
     while (queued.length) {
       const chunk = queued.splice(0, CHUNK_SIZE);
+      inFlight = chunk;
       updateUIDs(chunk.map(item => ({
         id: item.id, status: "pending" as const, paused: false, fetchError: undefined,
       })));
@@ -132,12 +134,13 @@ async function runQueue(): Promise<void> {
       updateUIDs(chunk.map(item => profileUpdate(item, byUID.get(item.uid), now)));
       for (const item of chunk) queuedIds.delete(item.id);
       emitActivity();
+      inFlight = [];
       if (queued.length) await sleep(BETWEEN_BATCHES_MS);
     }
   } catch (error) {
     // Never leave thousands of queued records permanently stuck in memory.
     console.error("UID Operator fetch worker failed", error);
-    pauseQueue("network_error", queued.splice(0));
+    pauseQueue("network_error", [...inFlight, ...queued.splice(0)]);
   }
 }
 
