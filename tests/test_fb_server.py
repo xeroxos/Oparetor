@@ -1,8 +1,9 @@
 """Network-free regression checks for the production UID Operator Flask API."""
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
-from fb_server import app, _valid_fb_image
+from fb_server import app, _valid_fb_image, get_public_info
 
 
 class UIDOperatorAPITests(unittest.TestCase):
@@ -45,6 +46,37 @@ class UIDOperatorAPITests(unittest.TestCase):
         self.assertNotIn("do-not-echo", res.get_data(as_text=True))
         self.assertNotIn("sensitive-cookie", res.get_data(as_text=True))
         fetcher.assert_called_once_with("100000000000000", None)
+
+    def test_public_og_metadata_parser(self):
+        page = (
+            '<html><head><title>Test Person | Facebook</title>'
+            '<meta property="og:title" content="Test Person"/>'
+            '<meta property="og:url" content="https://www.facebook.com/test.user"/>'
+            '<meta property="og:image" content="https://scontent.xx.fbcdn.net/pic.jpg"/>'
+            '<meta property="og:description" content="1,234 followers"/>'
+            '</head></html>'
+        )
+        fake = SimpleNamespace(
+            status_code=200,
+            url="https://m.facebook.com/profile.php?id=100000000000000",
+            text=page,
+        )
+        with patch("fb_server.requests.get", return_value=fake):
+            result = get_public_info("100000000000000")
+        self.assertEqual(result["name"], "Test Person")
+        self.assertEqual(result["username"], "test.user")
+        self.assertEqual(result["follower_count"], 1234)
+        self.assertTrue(result["profile_pic"].startswith("https://"))
+
+    def test_login_page_rejected(self):
+        fake = SimpleNamespace(
+            status_code=200,
+            url="https://www.facebook.com/profile.php?id=100000000000000",
+            text='<title>Log in to Facebook</title><meta property="og:image" content="https://scontent.xx.fbcdn.net/logo.jpg"/>',
+        )
+        with patch("fb_server.requests.get", return_value=fake):
+            result = get_public_info("100000000000000")
+        self.assertFalse(result)
 
     def test_public_avatar_url_validation(self):
         self.assertTrue(_valid_fb_image("https://scontent.xx.fbcdn.net/img.jpg"))
