@@ -1,12 +1,12 @@
 FROM node:24-bookworm-slim AS web-build
 
 WORKDIR /app
-RUN corepack enable
+RUN npm install -g pnpm@10.20.0
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json tsconfig.base.json ./
 COPY artifacts/uid-web ./artifacts/uid-web
 COPY lib ./lib
 ENV CI=true PNPM_DANGEROUSLY_ALLOW_ALL_BUILDS=true PORT=5173 BASE_PATH=/
-RUN pnpm install --no-frozen-lockfile
+RUN pnpm install --frozen-lockfile --reporter=append-only
 RUN pnpm --filter @workspace/uid-web run build
 
 FROM python:3.12-slim
