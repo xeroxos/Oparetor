@@ -17,6 +17,53 @@ export interface UIDEntry {
   retryQueued?: boolean;
 }
 
+/** Actual fetched metadata takes precedence over an outdated Failed flag.
+ * Never mistake the numeric UID itself, a login-page title, or an avatar
+ * placeholder for real profile metadata.
+ */
+export function hasFetchedProfileData(row: Pick<UIDEntry, "uid" | "name" | "username" | "profilePic">): boolean {
+  const name = typeof row.name === "string" ? row.name.trim() : "";
+  const username = typeof row.username === "string" ? row.username.trim() : "";
+  const realName = Boolean(name && name !== row.uid &&
+    !/^(?:facebook|error|unknown|log\s*in(?:\s*to\s*facebook)?|login|sign\s*up|create\s*an\s*account)$/i.test(name));
+  const realUsername = Boolean(username && username !== row.uid &&
+    !/^(?:facebook|login|profile\.php|error|unknown)$/i.test(username));
+  let realPhoto = false;
+  if (typeof row.profilePic === "string" && row.profilePic.length < 4096) {
+    try {
+      const url = new URL(row.profilePic);
+      realPhoto = url.protocol === "https:" &&
+        (url.hostname === "fbcdn.net" || url.hostname.endsWith(".fbcdn.net"));
+    } catch { /* malformed URLs are not profile evidence */ }
+  }
+  return realName || realUsername || realPhoto;
+}
+
+export function effectiveUIDStatus(row: UIDEntry): UIDEntry["status"] {
+  return hasFetchedProfileData(row) ? "success" : row.status;
+}
+
+function reconcileProfileStatus(row: UIDEntry): UIDEntry {
+  if (row.status === "success" || !hasFetchedProfileData(row)) return row;
+  return {
+    ...row, status: "success", paused: false, retryQueued: false,
+    fetchError: undefined,
+  };
+}
+
+function repairProfileStatuses(rows: UIDEntry[]): { rows: UIDEntry[]; changed: boolean } {
+  let changed = false;
+  const fixed = rows.map(row => {
+    // Repair the historical 'Err + real name/photo' bug; do not auto-complete
+    // intentionally pending imports from earlier sessions.
+    if (row.status !== "error") return row;
+    const corrected = reconcileProfileStatus(row);
+    if (corrected !== row) changed = true;
+    return corrected;
+  });
+  return { rows: changed ? fixed : rows, changed };
+}
+
 export interface AppPreferences {
   theme: "dark" | "light";
   fontSize: "sm" | "md" | "lg";
@@ -163,6 +210,20 @@ async function initializeDatabase(): Promise<void> {
       for (const change of lateChanges) rows = change(rows);
       await replaceDatabase(db, rows);
     }
+    // Correct previously saved Err records that already have an actual
+    // name, username or Facebook-CDN portrait. This is a non-destructive
+    // migration: IDs, passwords, metadata and record count remain unchanged.
+    const repaired = repairProfileStatuses(rows);
+    if (repaired.changed) {
+      await persistDelta(db, rows, repaired.rows);
+      rows = repaired.rows;
+    }
+    // Mutations received during repair still need to be replayed.
+    while (pendingChanges.length) {
+      const lateChanges = pendingChanges.splice(0);
+      for (const change of lateChanges) rows = change(rows);
+      await replaceDatabase(db, rows);
+    }
     database = db;
     dbAvailable = true;
     storageReady = true;
@@ -182,7 +243,8 @@ async function initializeDatabase(): Promise<void> {
 function init(): void {
   if (cache !== null) return;
   initialLegacy = readLegacy();
-  cache = initialLegacy;
+  // Make bad historical statuses display correctly while IndexedDB hydrates.
+  cache = repairProfileStatuses(initialLegacy).rows;
   void initializeDatabase();
 }
 
@@ -224,7 +286,7 @@ export function saveUIDs(uids: UIDEntry[]): boolean {
 
 export function appendUIDs(newUIDs: UIDEntry[]): { added: number; saved: boolean } {
   if (!newUIDs.length) return { added: 0, saved: true };
-  const saved = mutate(current => [...newUIDs, ...current]);
+  const saved = mutate(current => [...newUIDs.map(reconcileProfileStatus), ...current]);
   return { added: saved ? newUIDs.length : 0, saved };
 }
 
@@ -233,7 +295,7 @@ export function updateUIDs(updates: (Partial<UIDEntry> & { id: string })[]): voi
   const byId = new Map(updates.map(value => [value.id, value]));
   mutate(current => current.map(row => {
     const update = byId.get(row.id);
-    return update ? { ...row, ...update } : row;
+    return update ? reconcileProfileStatus({ ...row, ...update }) : row;
   }));
 }
 

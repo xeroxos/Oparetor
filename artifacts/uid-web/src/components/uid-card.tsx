@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, memo } from "react";
 import { Copy, Check, Star, Trash2, ExternalLink, Loader2, RefreshCw, MoreVertical } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { copyText } from "@/lib/clipboard";
-import type { UIDEntry } from "@/lib/storage";
+import { effectiveUIDStatus, type UIDEntry } from "@/lib/storage";
 
 interface UIDCardProps {
   entry: UIDEntry;
@@ -68,6 +68,8 @@ function UIDCardImpl({
   const imageSource = avatarURL
     ? (imageViaProxy ? "/api/fb/proxy/pic/" + encodeURIComponent(entry.uid) : avatarURL)
     : undefined;
+
+  const displayStatus = effectiveUIDStatus(entry);
 
   const initials = entry.name
     ? entry.name.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase()
@@ -200,17 +202,17 @@ function UIDCardImpl({
                 <Star className={`w-4 h-4 ${entry.saved ? "fill-[var(--warning)] text-[var(--warning)]" : ""}`} />
               </button>
 
-              {entry.status === "success" && (
+              {displayStatus === "success" && (
                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-500/10 text-[var(--success)] border border-green-500/20">
                   <span className="w-1.5 h-1.5 rounded-full bg-[var(--success)] inline-block" /> OK
                 </span>
               )}
-              {entry.status === "error" && (
+              {displayStatus === "error" && (
                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-500/10 text-[var(--error)] border border-red-500/20">
                   <span className="w-1.5 h-1.5 rounded-full bg-[var(--error)] inline-block" /> Err
                 </span>
               )}
-              {entry.status === "pending" && (
+              {displayStatus === "pending" && (
                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold text-[var(--text-muted)] bg-background border border-card-border">
                   <Loader2 className="w-2.5 h-2.5 animate-spin" /> Wait
                 </span>
