@@ -4,6 +4,7 @@ import requests
 import httpx
 from datetime import datetime
 import os
+from urllib.parse import urlsplit
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -66,6 +67,18 @@ def get_default_cookie() -> dict:
     return parse_cookies(raw)
 
 
+def _valid_fb_image(url: str) -> bool:
+    """Only permit HTTPS images hosted by Facebook's known CDN."""
+    try:
+        parsed = urlsplit(url)
+        host = (parsed.hostname or '').lower()
+        return (parsed.scheme == 'https'
+                and (host == 'fbcdn.net' or host.endswith('.fbcdn.net'))
+                and len(url) < 4096)
+    except ValueError:
+        return False
+
+
 def get_public_info(uid: str) -> dict:
     """
     Single m.facebook.com request → name + username + profile pic CDN URL.
@@ -77,15 +90,25 @@ def get_public_info(uid: str) -> dict:
         'login', 'sign up', 'create an account', ''
     }
     try:
-        r = requests.get(
-            f"https://m.facebook.com/profile.php?id={uid}",
-            headers=IPHONE_HEADERS,
-            timeout=12,
-            allow_redirects=True,
-        )
-        if r.status_code != 200:
-            return {}
-        if ('login' in r.url or 'checkpoint' in r.url):
+        # Public metadata only. A second endpoint is used if the first is blocked.
+        r = None
+        for host in ('m.facebook.com', 'www.facebook.com'):
+            try:
+                candidate = requests.get(
+                    f"https://{host}/profile.php?id={uid}",
+                    headers=IPHONE_HEADERS,
+                    timeout=10,
+                    allow_redirects=True,
+                    verify=True,
+                )
+                if (candidate.status_code == 200
+                        and 'login' not in candidate.url.lower()
+                        and 'checkpoint' not in candidate.url.lower()):
+                    r = candidate
+                    break
+            except requests.RequestException:
+                continue
+        if r is None:
             return {}
         soup = BeautifulSoup(r.text, 'html.parser')
         result: dict = {}
@@ -105,7 +128,7 @@ def get_public_info(uid: str) -> dict:
         og_image = soup.find('meta', property='og:image')
         if og_image and og_image.get('content'):
             cdn = og_image['content']
-            if 'fbcdn.net' in cdn or 'scontent' in cdn:
+            if _valid_fb_image(cdn):
                 result['profile_pic'] = cdn
                 _cache_cdn(uid, cdn)  # pre-warm proxy cache
 
@@ -173,13 +196,13 @@ def get_real_profile_pic_url(uid: str) -> str | None:
         (f"https://www.facebook.com/profile.php?id={uid}", BASE_HEADERS),
     ]:
         try:
-            r = requests.get(url_template, headers=ua_headers, timeout=10, verify=False, allow_redirects=True)
+            r = requests.get(url_template, headers=ua_headers, timeout=10, verify=True, allow_redirects=True)
             if r.status_code == 200:
                 soup = BeautifulSoup(r.text, 'html.parser')
                 og_image = soup.find('meta', property='og:image')
                 if og_image and og_image.get('content'):
                     cdn = og_image['content']
-                    if 'fbcdn.net' in cdn or 'scontent' in cdn:
+                    if _valid_fb_image(cdn):
                         _cache_cdn(uid, cdn)
                         return cdn
         except Exception:
@@ -195,7 +218,7 @@ def get_followers_with_cookies(uid: str, cookies: dict) -> dict:
     if not cookies:
         return {}
     try:
-        with httpx.Client(http2=False, verify=False, timeout=15, follow_redirects=True) as client:
+        with httpx.Client(http2=False, verify=True, timeout=15, follow_redirects=True) as client:
             r = client.get(
                 MBASIC_PROFILE_URL.format(uid=uid),
                 headers=BASE_HEADERS,
@@ -226,7 +249,7 @@ def get_followers_with_cookies(uid: str, cookies: dict) -> dict:
             og_image = soup.find('meta', property='og:image')
             if og_image and og_image.get('content'):
                 url = og_image['content']
-                if 'fbcdn.net' in url:
+                if _valid_fb_image(url):
                     result['profile_pic'] = url
 
             # Follower count from og:description
