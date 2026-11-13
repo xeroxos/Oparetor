@@ -17,12 +17,12 @@ const queryClient = new QueryClient();
 function AppHeader() {
   const [, setLocation] = useLocation();
   return (
-    <header className="app-header h-[74px] bg-card/90 border-b border-card-border flex items-center justify-between px-4 sticky top-0 z-20 shrink-0 backdrop-blur-xl">
+    <header className="app-header h-[60px] sm:h-[74px] bg-card/90 border-b border-card-border flex items-center justify-between px-3 sm:px-4 sticky top-0 z-20 shrink-0 backdrop-blur-xl">
       <div className="flex items-center gap-2.5">
         <div className="brand-mark" aria-hidden="true">
           <span className="h-3 w-3 rounded-full bg-white shadow-[0_0_12px_rgba(255,255,255,.95)]" />
         </div>
-        <h1 className="font-bold text-[22px] tracking-[-0.02em] text-[var(--text-primary)]">
+        <h1 className="font-bold text-[19px] sm:text-[22px] tracking-[-0.02em] text-[var(--text-primary)] whitespace-nowrap">
           UID <span className="text-[var(--primary)]">Operator</span>
         </h1>
       </div>
@@ -49,12 +49,12 @@ function BottomNav() {
   ];
 
   return (
-    <nav className="bottom-nav fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md border-t border-card-border bg-card/90 backdrop-blur-xl flex items-center justify-around px-2 z-50" aria-label="Primary navigation">
+    <nav className="bottom-nav fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md border-t border-card-border bg-card/95 backdrop-blur-xl flex items-center justify-around px-1.5 sm:px-2 z-50" aria-label="Primary navigation">
       {tabs.map((tab) => {
         const isActive = location === tab.href;
         const Icon = tab.icon;
         return (
-          <Link key={tab.href} href={tab.href} aria-current={isActive ? "page" : undefined} className={`nav-item flex flex-col items-center justify-center w-full gap-1 transition-colors ${isActive ? "is-active text-[var(--primary)]" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"}`}>
+          <Link key={tab.href} href={tab.href} aria-current={isActive ? "page" : undefined} className={`nav-item flex flex-col items-center justify-center w-full gap-0.5 sm:gap-1 transition-colors ${isActive ? "is-active text-[var(--primary)]" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"}`}>
             <span className="nav-icon"><Icon className="w-5 h-5" /></span>
             <span className="text-[10px] font-medium tracking-wide">{tab.label}</span>
           </Link>
@@ -72,9 +72,9 @@ function Router() {
   }
 
   return (
-    <div className="app-shell flex flex-col w-full min-h-[100dvh] max-w-md mx-auto bg-background relative">
+    <div className="app-shell flex flex-col w-full min-h-[100dvh] max-w-md mx-auto bg-background relative min-w-0">
       <AppHeader />
-      <main className="flex-1 overflow-y-auto pb-4" id="main-content">
+      <main className="app-main flex-1 min-w-0 overflow-y-auto" id="main-content">
         <Switch>
           <Route path="/" component={Home} />
           <Route path="/import" component={Import} />
