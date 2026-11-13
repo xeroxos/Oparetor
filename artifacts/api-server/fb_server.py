@@ -1,10 +1,10 @@
 from flask import Flask, request, jsonify, Response, stream_with_context, send_from_directory
-from flask_cors import CORS
 import re
 import requests
 import httpx
 from datetime import datetime
 import os
+from urllib.parse import urlsplit
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -13,7 +13,7 @@ STATIC_DIR = os.environ.get(
     os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uid-web", "dist", "public"),
 )
 app = Flask(__name__, static_folder=None)
-CORS(app)
+app.config['MAX_CONTENT_LENGTH'] = 128 * 1024  # reject oversized API payloads
 
 from flask import Blueprint
 
@@ -67,6 +67,18 @@ def get_default_cookie() -> dict:
     return parse_cookies(raw)
 
 
+def _valid_fb_image(url: str) -> bool:
+    """Only permit HTTPS images hosted by Facebook's known CDN."""
+    try:
+        parsed = urlsplit(url)
+        host = (parsed.hostname or '').lower()
+        return (parsed.scheme == 'https'
+                and (host == 'fbcdn.net' or host.endswith('.fbcdn.net'))
+                and len(url) < 4096)
+    except ValueError:
+        return False
+
+
 def get_public_info(uid: str) -> dict:
     """
     Single m.facebook.com request → name + username + profile pic CDN URL.
@@ -78,37 +90,59 @@ def get_public_info(uid: str) -> dict:
         'login', 'sign up', 'create an account', ''
     }
     try:
-        r = requests.get(
-            f"https://m.facebook.com/profile.php?id={uid}",
-            headers=IPHONE_HEADERS,
-            timeout=12,
-            verify=False,
-            allow_redirects=True,
-        )
-        if r.status_code != 200:
+        # Public metadata only. A second endpoint is used if the first is blocked.
+        r = None
+        for host in ('m.facebook.com', 'www.facebook.com'):
+            try:
+                candidate = requests.get(
+                    f"https://{host}/profile.php?id={uid}",
+                    headers=IPHONE_HEADERS,
+                    timeout=10,
+                    allow_redirects=True,
+                    verify=True,
+                )
+                if (candidate.status_code == 200
+                        and 'login' not in candidate.url.lower()
+                        and 'checkpoint' not in candidate.url.lower()):
+                    r = candidate
+                    break
+            except requests.RequestException:
+                continue
+        if r is None:
             return {}
-
         soup = BeautifulSoup(r.text, 'html.parser')
         result: dict = {}
 
         # --- Name ---
         t = soup.find('title')
+        if t and re.search(r'log in|log into|sign up|create an account|checkpoint', t.get_text(strip=True), re.I):
+            return {}
         if t:
             candidate = re.sub(r'\s*\|\s*Facebook\s*$', '', t.get_text(strip=True)).strip()
-            if candidate.lower() not in BAD_TITLES and len(candidate) > 1:
+            if candidate.lower() not in BAD_TITLES and len(candidate) > 1 and not re.search(r'log in|sign up|create an account|facebook helps', candidate, re.I):
                 result['name'] = candidate
         if not result.get('name'):
             og_title = soup.find('meta', property='og:title')
-            if og_title and og_title.get('content', '').strip().lower() not in BAD_TITLES:
+            if og_title and og_title.get('content', '').strip().lower() not in BAD_TITLES and not re.search(r'log in|sign up|create an account', og_title.get('content', ''), re.I):
                 result['name'] = og_title['content'].strip()
 
         # --- Profile pic CDN URL (og:image) ---
         og_image = soup.find('meta', property='og:image')
         if og_image and og_image.get('content'):
             cdn = og_image['content']
-            if 'fbcdn.net' in cdn or 'scontent' in cdn:
+            if _valid_fb_image(cdn):
                 result['profile_pic'] = cdn
                 _cache_cdn(uid, cdn)  # pre-warm proxy cache
+
+        # --- Public follower count (only when exposed in page metadata) ---
+        og_desc = soup.find('meta', property='og:description') or soup.find('meta', attrs={'name': 'description'})
+        if og_desc and og_desc.get('content'):
+            match = re.search(r'([\d,]+)\s+followers', og_desc['content'], re.I)
+            if match:
+                try:
+                    result['follower_count'] = int(match.group(1).replace(',', ''))
+                except ValueError:
+                    pass
 
         # --- Username ---
         BAD_SLUGS = {'profile.php', 'home.php', 'login', 'sharer', ''}
@@ -174,13 +208,13 @@ def get_real_profile_pic_url(uid: str) -> str | None:
         (f"https://www.facebook.com/profile.php?id={uid}", BASE_HEADERS),
     ]:
         try:
-            r = requests.get(url_template, headers=ua_headers, timeout=10, verify=False, allow_redirects=True)
+            r = requests.get(url_template, headers=ua_headers, timeout=10, verify=True, allow_redirects=True)
             if r.status_code == 200:
                 soup = BeautifulSoup(r.text, 'html.parser')
                 og_image = soup.find('meta', property='og:image')
                 if og_image and og_image.get('content'):
                     cdn = og_image['content']
-                    if 'fbcdn.net' in cdn or 'scontent' in cdn:
+                    if _valid_fb_image(cdn):
                         _cache_cdn(uid, cdn)
                         return cdn
         except Exception:
@@ -196,7 +230,7 @@ def get_followers_with_cookies(uid: str, cookies: dict) -> dict:
     if not cookies:
         return {}
     try:
-        with httpx.Client(http2=False, verify=False, timeout=15, follow_redirects=True) as client:
+        with httpx.Client(http2=False, verify=True, timeout=15, follow_redirects=True) as client:
             r = client.get(
                 MBASIC_PROFILE_URL.format(uid=uid),
                 headers=BASE_HEADERS,
@@ -227,7 +261,7 @@ def get_followers_with_cookies(uid: str, cookies: dict) -> dict:
             og_image = soup.find('meta', property='og:image')
             if og_image and og_image.get('content'):
                 url = og_image['content']
-                if 'fbcdn.net' in url:
+                if _valid_fb_image(url):
                     result['profile_pic'] = url
 
             # Follower count from og:description
@@ -258,7 +292,6 @@ def check_instagram(username: str) -> bool:
             },
             timeout=6,
             allow_redirects=True,
-            verify=False,
         )
         return r.status_code == 200
     except Exception:
@@ -303,18 +336,20 @@ def fetch_uid_info(uid: str, extra_cookies: dict | None) -> dict:
         result['profile_pic'] = cdn_pic
     else:
         # Fallback: proxy URL (browser → Express → Flask → CDN)
-        result['profile_pic'] = f"/fb-api/proxy/pic/{uid}"
+        result['profile_pic'] = None  # never return a broken HTML SPA path as an image
 
     # Follower count
     if mbasic.get('follower_count') is not None:
         result['follower_count'] = mbasic['follower_count']
+    elif pub.get('follower_count') is not None:
+        result['follower_count'] = pub['follower_count']
 
     # Mark success
     if result['name'] or cdn_pic:
         result['status'] = 'success'
 
     # Instagram check (only if we have a username)
-    if result.get('username'):
+    if os.environ.get('ENABLE_INSTAGRAM_CHECK', 'false').lower() == 'true' and result.get('username'):
         result['has_instagram'] = check_instagram(result['username'])
 
     return result
@@ -327,6 +362,8 @@ def proxy_pic(uid: str):
     Serves from in-memory CDN cache (pre-warmed during batch fetch) — instant.
     Falls back to fresh og:image fetch if cache miss.
     """
+    if not re.fullmatch(r'[0-9]{5,25}', uid):
+        return jsonify({'error': 'Invalid UID'}), 400
     # 1. Check in-memory cache first (pre-warmed during /uid/fetch)
     cdn_url = _get_cached_cdn(uid)
 
@@ -343,7 +380,6 @@ def proxy_pic(uid: str):
             cdn_url,
             headers={'User-Agent': FBOT_UA, 'Referer': 'https://www.facebook.com/'},
             timeout=12,
-            verify=False,
             stream=True,
         )
         if img_resp.status_code != 200:
@@ -351,7 +387,9 @@ def proxy_pic(uid: str):
             _cdn_cache.pop(uid, None)
             return jsonify({'error': 'CDN fetch failed'}), 502
 
-        content_type = img_resp.headers.get('Content-Type', 'image/jpeg')
+        content_type = img_resp.headers.get('Content-Type', '')
+        if not content_type.lower().startswith('image/'):
+            return jsonify({'error': 'CDN response is not an image'}), 502
 
         def generate():
             for chunk in img_resp.iter_content(chunk_size=8192):
@@ -395,9 +433,13 @@ def fetch_uids():
     uid_list = data['uids']
     if not isinstance(uid_list, list):
         return jsonify({'success': False, 'error': 'uids must be a list'}), 400
+    if not 1 <= len(uid_list) <= 15:
+        return jsonify({'success': False, 'error': 'Provide between 1 and 15 UIDs per request'}), 400
+    if any(not isinstance(row, dict) or not re.fullmatch(r'[0-9]{5,25}', str(row.get('uid', ''))) for row in uid_list):
+        return jsonify({'success': False, 'error': 'Each UID must contain 5-25 digits'}), 400
 
     # Read cookie fresh at request time — no restart needed after env var update
-    cookie_str = data.get('cookie', '') or os.environ.get("FB_DEFAULT_COOKIE", "")
+    cookie_str = os.environ.get('FB_DEFAULT_COOKIE', '')  # no browser session cookies accepted
     global_cookies = parse_cookies(cookie_str)
 
     def process_one(item):
@@ -410,7 +452,7 @@ def fetch_uids():
         return {'uid': uid, 'result': result}
 
     results = []
-    max_workers = min(20, max(1, len(uid_list)))
+    max_workers = min(6, len(uid_list))
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = [pool.submit(process_one, item) for item in uid_list]
         for fut in as_completed(futures):
@@ -456,6 +498,8 @@ def get_profile():
 
     m = re.search(r'(?:profile\.php\?id=|facebook\.com/)([^/?&]+)', url)
     uid = m.group(1) if m else ''
+    if not re.fullmatch(r'[0-9]{5,25}', uid):
+        return jsonify({"status": "error", "message": "Invalid numeric UID"}), 400
     result = fetch_uid_info(uid, None)
     return jsonify({"success": True, "data": result, "timestamp": datetime.now().isoformat()})
 
@@ -488,7 +532,7 @@ def root():
 
 @app.route('/<path:path>', methods=['GET'])
 def serve_frontend(path):
-    if path.startswith('api/'):
+    if path.startswith(('api/', 'fb-api/')):
         return jsonify({"success": False, "error": "Endpoint not found"}), 404
     requested = os.path.join(STATIC_DIR, path)
     if os.path.isfile(requested):

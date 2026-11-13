@@ -27,6 +27,7 @@ function UIDCardImpl({
   onCheck,
   swipeToDelete = false,
 }: UIDCardProps) {
+  const [imageViaProxy, setImageViaProxy] = useState(false);
   const [copiedUID, setCopiedUID] = useState(false);
   const [copiedPass, setCopiedPass] = useState(false);
   const [copiedUser, setCopiedUser] = useState(false);
@@ -60,6 +61,13 @@ function UIDCardImpl({
   const openFB = () => {
     window.location.href = `fb://profile/${entry.uid}`;
   };
+
+  const avatarURL = entry.profilePic && /^https:\/\//i.test(entry.profilePic)
+    ? entry.profilePic : undefined;
+  useEffect(() => { setImageViaProxy(false); }, [entry.profilePic]);
+  const imageSource = avatarURL
+    ? (imageViaProxy ? "/api/fb/proxy/pic/" + encodeURIComponent(entry.uid) : avatarURL)
+    : undefined;
 
   const initials = entry.name
     ? entry.name.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase()
@@ -106,7 +114,7 @@ function UIDCardImpl({
 
   return (
     <div
-      className="bg-card border border-card-border rounded-xl shadow-sm overflow-hidden relative"
+      className="bg-gradient-to-b from-[#172336] to-[#101a2b] border border-[#263650] rounded-[22px] shadow-md overflow-hidden relative"
       data-testid={`card-uid-${entry.uid}`}
       style={{ transform: `translateX(${swipeX}px)`, transition: swipeX === 0 ? "transform 0.2s ease" : "none" }}
       onTouchStart={onTouchStart}
@@ -135,8 +143,8 @@ function UIDCardImpl({
         )}
 
         {/* Avatar */}
-        <Avatar className="w-[72px] h-[72px] border-2 border-card-border shrink-0 rounded-xl">
-          <AvatarImage src={entry.profilePic} alt={entry.name || entry.uid} className="object-cover" loading="lazy" />
+        <Avatar className="w-[72px] h-[96px] border-2 border-[#27a6ec] shrink-0 rounded-[17px]">
+          <AvatarImage src={imageSource} alt={entry.name || entry.uid} className="object-cover" loading="lazy" referrerPolicy="no-referrer" onError={() => { if (!imageViaProxy && avatarURL) setImageViaProxy(true); }} />
           <AvatarFallback className="text-sm font-mono font-bold text-[var(--text-muted)] bg-background rounded-xl">
             {initials}
           </AvatarFallback>
@@ -289,10 +297,8 @@ function UIDCardImpl({
           <div className="flex items-center gap-1.5 text-xs">
             <span className="text-[var(--text-muted)] font-mono shrink-0 w-7">UID</span>
             <span
-              className="font-mono text-[var(--text-primary)] truncate cursor-pointer hover:text-[var(--primary)] transition-colors flex-1 min-w-0"
-              onClick={() => copy(entry.uid, "uid")}
-              title="Tap to copy UID"
-              style={{ touchAction: "manipulation" }}
+              className="font-mono text-[var(--text-primary)] truncate flex-1 min-w-0 select-text"
+              title="UID (use the copy button)"
             >
               {entry.uid}
             </span>

@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { Moon, Sun, Trash2, Database } from "lucide-react";
+import { Moon, Sun, Trash2, Database, Download, FileJson, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -7,6 +6,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { usePreferences } from "@/hooks/use-preferences";
 import { useUIDs } from "@/hooks/use-uids";
 import { useToast } from "@/hooks/use-toast";
+import { Link } from "wouter";
+import { getUIDs, waitForUIDStorage } from "@/lib/storage";
 
 export default function Settings() {
   const { prefs, updatePref } = usePreferences();
@@ -18,6 +19,35 @@ export default function Settings() {
       clearAllUIDs();
       toast({ title: "ডিলিট হয়েছে", description: "সব UID মুছে ফেলা হয়েছে।" });
     }
+  };
+
+  const download = (name: string, text: string, mime: string) => {
+    const blob = new Blob([text], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const exportBackup = async (format: "json" | "txt") => {
+    await waitForUIDStorage();
+    const records = getUIDs();
+    if (!records.length) {
+      toast({ title: "No UIDs to export" });
+      return;
+    }
+    if (records.some(row => row.password) &&
+        !confirm("This backup contains plaintext passwords. Save it only to a private device?")) return;
+    if (format === "json") {
+      download("uid-operator-backup-" + new Date().toISOString().slice(0, 10) + ".json",
+        JSON.stringify(records, null, 2), "application/json");
+    } else {
+      download("uid-operator-" + new Date().toISOString().slice(0, 10) + ".txt",
+        records.map(row => row.uid + (row.password ? "|" + row.password : "")).join("\n"), "text/plain");
+    }
+    toast({ title: "Backup exported", description: records.length.toLocaleString() + " UIDs included" });
   };
 
   return (
@@ -126,6 +156,22 @@ export default function Settings() {
                 onCheckedChange={v => updatePref("autoRetry", v)}
                 data-testid="toggle-auto-retry"
               />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* LOCAL BACKUP / RECOVERY — never transmitted to Railway */}
+      <div className="space-y-2">
+        <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider pl-1">Backup & Restore</h3>
+        <Card className="bg-card">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center gap-2 text-sm"><Download className="w-4 h-4 text-[var(--primary)]" />Local browser backup</div>
+            <p className="text-xs text-muted-foreground">Saved only on your device. Export before clearing browser data or changing from Termux localhost to the Railway domain.</p>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={() => void exportBackup("json")}><FileJson className="w-4 h-4 mr-1" />Export JSON</Button>
+              <Button variant="outline" size="sm" onClick={() => void exportBackup("txt")}><FileText className="w-4 h-4 mr-1" />Export UID|Pass</Button>
+              <Link href="/import" className="inline-flex items-center border border-card-border rounded-md px-3 text-xs text-[var(--primary)]">Restore backup</Link>
             </div>
           </CardContent>
         </Card>

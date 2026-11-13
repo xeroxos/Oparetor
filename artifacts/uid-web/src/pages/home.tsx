@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { Link } from "wouter";
 import { Plus, Users, MoreHorizontal, RotateCw, Eye, EyeOff, ChevronLeft, ChevronRight, Hash } from "lucide-react";
-import { useUIDs } from "@/hooks/use-uids";
+import { useUIDs, getFetchActivity } from "@/hooks/use-uids";
 import { usePreferences } from "@/hooks/use-preferences";
 import { Input } from "@/components/ui/input";
 import { UIDCard } from "@/components/uid-card";
@@ -37,7 +37,14 @@ export default function Home() {
   const [showPasswords, setShowPasswords] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(() => new Set());
   const [fetchingIds, setFetchingIds] = useState<Set<string>>(() => new Set());
+  const [globalFetching, setGlobalFetching] = useState(() => getFetchActivity());
   const sentinelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const refresh = () => setGlobalFetching(getFetchActivity());
+    window.addEventListener("uids-fetch-state", refresh);
+    return () => window.removeEventListener("uids-fetch-state", refresh);
+  }, []);
 
   const handleBatchFetch = useCallback(async (items: UIDEntry[]) => {
     if (items.length === 0) return;
@@ -58,11 +65,12 @@ export default function Home() {
   }, [batchFetch]);
 
   useEffect(() => {
-    const pending = uids.filter(u => u.status === "pending" && !u.fetchedAt);
+    // Resume pending entries after async IndexedDB hydration or browser restart.
+    // The module-level queue deduplicates requests from Import and Home.
+    if (getFetchActivity() > 0) return;
+    const pending = uids.filter(u => u.status === "pending" && !u.fetchedAt && !u.paused);
     if (pending.length) void handleBatchFetch(pending);
-    // Resume an interrupted import just once on mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [uids, handleBatchFetch]);
 
   useEffect(() => {
     if (!prefs.autoRetry) return;
@@ -107,7 +115,17 @@ export default function Home() {
 
   const done = stats.success + stats.error;
   const progress = stats.total ? Math.round(done * 100 / stats.total) : 0;
-  const active = fetchingIds.size > 0;
+  const active = fetchingIds.size > 0 || globalFetching > 0;
+
+  const handleFetchOne = useCallback((entry: UIDEntry) => { void handleBatchFetch([entry]); }, [handleBatchFetch]);
+  const handleCardCheck = useCallback((id: string, checked: boolean) => {
+    setCheckedIds(prev => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }, []);
 
   const copySelected = (withPassword: boolean) => {
     const text = uids.filter(u => checkedIds.has(u.id))
@@ -130,7 +148,7 @@ export default function Home() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5 mb-2 text-[11px] font-mono">
               <span className={`h-2 w-2 rounded-full ${active ? "bg-amber-400 animate-pulse" : "bg-[var(--success)]"}`} />
-              <strong className="font-semibold text-[var(--text-primary)]">{active ? "Running" : stats.pending ? "Ready" : "Done"}</strong>
+              <strong className="font-semibold text-[var(--text-primary)]">{active ? "Running" : stats.total === 0 || stats.pending ? "Ready" : "Done"}</strong>
               <span className="text-[var(--primary)]">{progress}%</span>
             </div>
             <div className="h-1.5 w-full rounded-full bg-[#25344e] overflow-hidden" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
@@ -200,7 +218,7 @@ export default function Home() {
       ) : (
         <div className="flex flex-col gap-2.5 pb-6">
           {renderedUIDs.map(entry => (
-            <UIDCard key={entry.id} entry={entry} onToggleSaved={toggleSaved} onDelete={deleteUID} onFetch={u => void handleBatchFetch([u])} showPassword={showPasswords} isFetching={fetchingIds.has(entry.id)} checked={checkedIds.has(entry.id)} onCheck={(id,checked) => setCheckedIds(prev => { const next = new Set(prev); checked ? next.add(id) : next.delete(id); return next; })} swipeToDelete={prefs.swipeToDelete} />
+            <UIDCard key={entry.id} entry={entry} onToggleSaved={toggleSaved} onDelete={deleteUID} onFetch={handleFetchOne} showPassword={showPasswords} isFetching={fetchingIds.has(entry.id)} checked={checkedIds.has(entry.id)} onCheck={handleCardCheck} swipeToDelete={prefs.swipeToDelete} />
           ))}
           {renderCount < pageUIDs.length && <div ref={sentinelRef} className="text-center text-xs text-[var(--text-muted)] py-5">Loading cards… {renderedUIDs.length}/{pageUIDs.length}</div>}
         </div>
