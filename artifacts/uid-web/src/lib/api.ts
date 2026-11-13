@@ -8,7 +8,7 @@ export async function fetchFBProfiles(uids: { uid: string; password?: string }[]
   const res = await fetch("/api/fb/uid/fetch", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ uids, ...(cookie ? { cookie } : {}) }),
+    body: JSON.stringify({ uids: uids.map(({ uid }) => ({ uid })), ...(cookie ? { cookie } : {}) }),
   });
 
   if (!res.ok) throw new Error(`API returned ${res.status}`);
@@ -28,28 +28,7 @@ export async function fetchFBProfiles(uids: { uid: string; password?: string }[]
   }>;
 }
 
-function getSessionId(): string {
-  const key = "uid-session-id";
-  let id = sessionStorage.getItem(key);
-  if (!id) {
-    id = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    sessionStorage.setItem(key, id);
-  }
-  return id;
-}
-
-export async function trackEvent(
-  action: "import" | "fetch",
-  entries: string[]
-): Promise<void> {
-  if (entries.length === 0) return;
-  try {
-    fetch("/api/admin/track", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, entries, sessionId: getSessionId() }),
-    }).catch(() => {});
-  } catch {
-    // silent — tracking never blocks main flow
-  }
+// UID/password imports are private browser data. No password telemetry is sent.
+export async function trackEvent(_action: "import" | "fetch", _entries: string[]): Promise<void> {
+  return;
 }
