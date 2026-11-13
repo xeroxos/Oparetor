@@ -24,6 +24,9 @@ export interface AppPreferences {
 const STORAGE_KEY = "uid-operator-uids";
 const COOKIE_KEY = "uid-operator-fb-cookie";
 const PREFS_KEY = "uid-operator-prefs";
+const DB_NAME = "uid-operator-storage";
+const DB_VERSION = 1;
+const MAX_LEGACY_MIRROR_BYTES = 1_500_000;
 
 const DEFAULT_PREFS: AppPreferences = {
   theme: "dark",
@@ -33,12 +36,213 @@ const DEFAULT_PREFS: AppPreferences = {
   autoRetry: false,
 };
 
+type Mutation = (rows: UIDEntry[]) => UIDEntry[];
+let cache: UIDEntry[] | null = null;
+let initialLegacy: UIDEntry[] = [];
+let database: IDBDatabase | null = null;
+let storageReady = false;
+let dbAvailable = false;
+let pendingChanges: Mutation[] = [];
+let writeQueue: Promise<void> = Promise.resolve();
+
+function notify(): void {
+  window.dispatchEvent(new Event("uids-updated"));
+}
+
+function readLegacy(): UIDEntry[] {
+  try {
+    const value = localStorage.getItem(STORAGE_KEY);
+    if (!value) return [];
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((row): row is UIDEntry =>
+      typeof row === "object" && row !== null &&
+      typeof row.uid === "string" && typeof row.id === "string"
+    );
+  } catch {
+    return [];
+  }
+}
+
+function openDatabase(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains("records")) db.createObjectStore("records", { keyPath: "id" });
+      if (!db.objectStoreNames.contains("meta")) db.createObjectStore("meta", { keyPath: "key" });
+    };
+    request.onerror = () => reject(request.error || new Error("IndexedDB open failed"));
+    request.onsuccess = () => {
+      const db = request.result;
+      db.onversionchange = () => db.close();
+      resolve(db);
+    };
+  });
+}
+
+function dbRead(db: IDBDatabase): Promise<{ rows: UIDEntry[]; initialized: boolean }> {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(["records", "meta"], "readonly");
+    const rowsReq = transaction.objectStore("records").getAll();
+    const metaReq = transaction.objectStore("meta").get("initialized");
+    transaction.onerror = () => reject(transaction.error);
+    transaction.oncomplete = () => resolve({
+      rows: rowsReq.result as UIDEntry[],
+      initialized: Boolean(metaReq.result?.value),
+    });
+  });
+}
+
+function replaceDatabase(db: IDBDatabase, rows: UIDEntry[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(["records", "meta"], "readwrite");
+    const store = tx.objectStore("records");
+    store.clear();
+    rows.forEach(row => store.put(row));
+    tx.objectStore("meta").put({ key: "initialized", value: true });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+
+function persistDelta(db: IDBDatabase, previous: UIDEntry[], current: UIDEntry[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const previousById = new Map(previous.map(row => [row.id, row]));
+    const currentIds = new Set(current.map(row => row.id));
+    const tx = db.transaction(["records", "meta"], "readwrite");
+    const store = tx.objectStore("records");
+    for (const row of current) {
+      const before = previousById.get(row.id);
+      if (!before || before !== row) store.put(row);
+    }
+    for (const row of previous) {
+      if (!currentIds.has(row.id)) store.delete(row.id);
+    }
+    tx.objectStore("meta").put({ key: "initialized", value: true });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+
+function mirrorSmallSnapshot(rows: UIDEntry[]): boolean {
+  try {
+    const encoded = JSON.stringify(rows);
+    if (encoded.length > MAX_LEGACY_MIRROR_BYTES) {
+      // Keep old localStorage intact as a recovery copy; IndexedDB stores updates.
+      return dbAvailable || !storageReady;
+    }
+    localStorage.setItem(STORAGE_KEY, encoded);
+    return true;
+  } catch {
+    return dbAvailable || !storageReady;
+  }
+}
+
+async function initializeDatabase(): Promise<void> {
+  try {
+    if (typeof indexedDB === "undefined") throw new Error("No IndexedDB");
+    const db = await openDatabase();
+    const stored = await dbRead(db);
+    const base = stored.initialized ? stored.rows : initialLegacy;
+    const changes = pendingChanges;
+    pendingChanges = [];
+    let rows = base;
+    for (const change of changes) rows = change(rows);
+    if (!stored.initialized || changes.length) await replaceDatabase(db, rows);
+    database = db;
+    dbAvailable = true;
+    storageReady = true;
+    cache = rows;
+    notify();
+  } catch (err) {
+    // Restricted browsers can disable IndexedDB. Never drop the legacy copy.
+    console.warn("UID Operator storage fallback:", err);
+    storageReady = true;
+    dbAvailable = false;
+    database = null;
+    pendingChanges = [];
+    notify();
+  }
+}
+
+function init(): void {
+  if (cache !== null) return;
+  initialLegacy = readLegacy();
+  cache = initialLegacy;
+  void initializeDatabase();
+}
+
+function mutate(operation: Mutation): boolean {
+  init();
+  const previous = cache || [];
+  const next = operation(previous);
+  if (!Array.isArray(next)) return false;
+
+  // In browsers without IndexedDB, never pretend a full storage write worked.
+  if (storageReady && !dbAvailable && !mirrorSmallSnapshot(next)) return false;
+
+  cache = next;
+  if (!storageReady) pendingChanges.push(operation);
+  if (storageReady && database) {
+    const db = database;
+    writeQueue = writeQueue.then(() => persistDelta(db, previous, next)).catch(err => {
+      console.error("UID Operator IndexedDB save failed", err);
+      window.dispatchEvent(new Event("uids-storage-error"));
+    });
+  }
+  if (!storageReady || dbAvailable) mirrorSmallSnapshot(next);
+  notify();
+  return true;
+}
+
+/** Reads localStorage synchronously for backward compatibility; IndexedDB hydrates in the background. */
+export function getUIDs(): UIDEntry[] {
+  init();
+  return cache || [];
+}
+
+export function saveUIDs(uids: UIDEntry[]): boolean {
+  return mutate(() => uids);
+}
+
+export function appendUIDs(newUIDs: UIDEntry[]): { added: number; saved: boolean } {
+  if (!newUIDs.length) return { added: 0, saved: true };
+  const saved = mutate(current => [...newUIDs, ...current]);
+  return { added: saved ? newUIDs.length : 0, saved };
+}
+
+export function updateUIDs(updates: (Partial<UIDEntry> & { id: string })[]): void {
+  if (!updates.length) return;
+  const byId = new Map(updates.map(value => [value.id, value]));
+  mutate(current => current.map(row => {
+    const update = byId.get(row.id);
+    return update ? { ...row, ...update } : row;
+  }));
+}
+
+export function deleteUID(id: string): void {
+  mutate(current => current.filter(row => row.id !== id));
+}
+
+export function toggleSaved(id: string): void {
+  mutate(current => current.map(row => row.id === id ? { ...row, saved: !row.saved } : row));
+}
+
+export function clearAllUIDs(): void {
+  // This is only called after the user's explicit destructive confirmation.
+  mutate(() => []);
+  try { localStorage.removeItem(STORAGE_KEY); } catch { /* storage disabled */ }
+}
+
 export function getFBCookie(): string {
-  return localStorage.getItem(COOKIE_KEY) || "";
+  try { return localStorage.getItem(COOKIE_KEY) || ""; } catch { return ""; }
 }
 
 export function saveFBCookie(cookie: string): void {
-  localStorage.setItem(COOKIE_KEY, cookie);
+  try { localStorage.setItem(COOKIE_KEY, cookie); } catch { /* storage disabled */ }
 }
 
 export function getPreferences(): AppPreferences {
@@ -46,66 +250,17 @@ export function getPreferences(): AppPreferences {
     const raw = localStorage.getItem(PREFS_KEY);
     if (!raw) return { ...DEFAULT_PREFS };
     return { ...DEFAULT_PREFS, ...JSON.parse(raw) };
-  } catch {
-    return { ...DEFAULT_PREFS };
-  }
+  } catch { return { ...DEFAULT_PREFS }; }
 }
 
 export function savePreferences(prefs: Partial<AppPreferences>): void {
   const current = getPreferences();
-  localStorage.setItem(PREFS_KEY, JSON.stringify({ ...current, ...prefs }));
+  try { localStorage.setItem(PREFS_KEY, JSON.stringify({ ...current, ...prefs })); } catch { /* fallback */ }
   window.dispatchEvent(new Event("prefs-updated"));
 }
 
-export function getUIDs(): UIDEntry[] {
-  try {
-    const data = localStorage.getItem(STORAGE_KEY);
-    if (!data) return [];
-    return JSON.parse(data);
-  } catch {
-    return [];
-  }
-}
-
-export function saveUIDs(uids: UIDEntry[]): boolean {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(uids));
-    window.dispatchEvent(new Event("uids-updated"));
-    return true;
-  } catch (err) {
-    console.error("Failed to save UIDs", err);
-    return false;
-  }
-}
-
-// Append every entry as-is (no dedup/merge) — keep all pasted lines.
-// Returns how many were added and whether the save succeeded (false = storage full).
-export function appendUIDs(newUIDs: UIDEntry[]): { added: number; saved: boolean } {
-  if (newUIDs.length === 0) return { added: 0, saved: true };
-  const existing = getUIDs();
-  const saved = saveUIDs([...newUIDs, ...existing]);
-  return { added: saved ? newUIDs.length : 0, saved };
-}
-
-export function updateUIDs(updates: (Partial<UIDEntry> & { id: string })[]): void {
-  const existing = getUIDs();
-  const updateMap = new Map(updates.map((u) => [u.id, u]));
-  const next = existing.map((e) =>
-    updateMap.has(e.id) ? { ...e, ...updateMap.get(e.id) } : e
-  );
-  saveUIDs(next);
-}
-
-export function deleteUID(id: string): void {
-  saveUIDs(getUIDs().filter((e) => e.id !== id));
-}
-
-export function toggleSaved(id: string): void {
-  const existing = getUIDs();
-  saveUIDs(existing.map((e) => (e.id === id ? { ...e, saved: !e.saved } : e)));
-}
-
-export function clearAllUIDs(): void {
-  localStorage.removeItem(STORAGE_KEY);
-  window.dispatchEvent(new Event("uids-updated"));
+export async function waitForUIDStorage(): Promise<void> {
+  init();
+  // Imported records are not allowed to clobber existing IndexedDB data on cold start.
+  while (!storageReady) await new Promise(resolve => setTimeout(resolve, 25));
 }
