@@ -114,7 +114,7 @@ function UIDCardImpl({
 
   return (
     <div
-      className="bg-gradient-to-b from-[#172336] to-[#101a2b] border border-[#263650] rounded-[22px] shadow-md overflow-hidden relative"
+      className="uid-card bg-gradient-to-b from-[#172336] to-[#101a2b] border border-[#263650] rounded-[18px] sm:rounded-[22px] shadow-md overflow-hidden relative"
       data-testid={`card-uid-${entry.uid}`}
       style={{ transform: `translateX(${swipeX}px)`, transition: swipeX === 0 ? "transform 0.2s ease" : "none" }}
       onTouchStart={onTouchStart}
@@ -129,21 +129,21 @@ function UIDCardImpl({
         </div>
       )}
 
-      <div className="flex gap-3 p-3">
+      <div className="uid-card-inner flex gap-2 p-2.5 sm:gap-3 sm:p-3">
         {onCheck && (
           <div className="flex items-center">
             <input
               type="checkbox"
               checked={checked}
               onChange={(e) => onCheck(entry.id, e.target.checked)}
-              className="w-4 h-4 rounded accent-[var(--primary)] cursor-pointer"
+              className="uid-card-check w-4 h-4 shrink-0 rounded accent-[var(--primary)] cursor-pointer"
               data-testid={`checkbox-${entry.id}`}
             />
           </div>
         )}
 
         {/* Avatar */}
-        <Avatar className="w-[72px] h-[96px] border-2 border-[#27a6ec] shrink-0 rounded-[17px]">
+        <Avatar className="uid-card-avatar w-[60px] h-[78px] sm:w-[72px] sm:h-[96px] border-2 border-[#27a6ec] shrink-0 rounded-[14px] sm:rounded-[17px]">
           <AvatarImage src={imageSource} alt={entry.name || entry.uid} className="object-cover" loading="lazy" referrerPolicy="no-referrer" onError={() => { if (!imageViaProxy && avatarURL) setImageViaProxy(true); }} />
           <AvatarFallback className="text-sm font-mono font-bold text-[var(--text-muted)] bg-background rounded-xl">
             {initials}
@@ -151,12 +151,12 @@ function UIDCardImpl({
         </Avatar>
 
         {/* Info */}
-        <div className="flex-1 min-w-0 flex flex-col gap-1">
+        <div className="uid-card-content flex-1 min-w-0 flex flex-col gap-0.5 sm:gap-1">
           {/* Name row */}
-          <div className="flex items-start justify-between gap-2">
+          <div className="uid-card-titlebar flex items-start justify-between gap-1">
             <div className="flex items-center gap-1.5 min-w-0">
               <h3
-                className="font-bold text-[var(--text-primary)] text-sm leading-tight truncate"
+                className="uid-card-name font-bold text-[var(--text-primary)] text-[13px] sm:text-sm leading-tight truncate"
                 title={entry.name || entry.uid}
               >
                 {entry.name || entry.uid}
@@ -189,7 +189,7 @@ function UIDCardImpl({
             </div>
 
             {/* Right: star + status + 3-dot menu */}
-            <div className="flex items-center gap-1 shrink-0">
+            <div className="uid-card-actions flex items-center gap-0.5 sm:gap-1 shrink-0">
               <button
                 onClick={() => onToggleSaved(entry.id)}
                 className="text-[var(--text-muted)] hover:text-[var(--warning)] transition-colors p-0.5"
@@ -267,7 +267,7 @@ function UIDCardImpl({
 
           {/* Username + followers */}
           {(entry.username || entry.followerCount !== undefined) && (
-            <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+            <div className="uid-card-username flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs text-[var(--text-muted)] min-h-[16px]">
               {entry.username && (
                 <div className="flex items-center gap-1 min-w-0">
                   <span className="truncate max-w-[110px]">@{entry.username}</span>
@@ -291,10 +291,10 @@ function UIDCardImpl({
           )}
 
           {/* Divider */}
-          <div className="w-full h-px bg-[var(--card-border)] mt-1" />
+          <div className="uid-card-divider w-full h-px bg-[var(--card-border)] mt-0.5 sm:mt-1" />
 
           {/* UID row */}
-          <div className="flex items-center gap-1.5 text-xs">
+          <div className="uid-card-info-row flex items-center gap-1 sm:gap-1.5 text-[11px] sm:text-xs min-h-[24px]">
             <span className="text-[var(--text-muted)] font-mono shrink-0 w-7">UID</span>
             <span
               className="font-mono text-[var(--text-primary)] truncate flex-1 min-w-0 select-text"
@@ -304,34 +304,34 @@ function UIDCardImpl({
             </span>
             <button
               onClick={() => copy(entry.uid, "uid")}
-              className="shrink-0 text-[var(--text-muted)] hover:text-[var(--primary)] transition-colors p-1.5"
+              className="uid-card-copy shrink-0 text-[var(--text-muted)] hover:text-[var(--primary)] transition-colors p-1 sm:p-1.5"
               title="Copy UID"
               data-testid={`btn-copy-uid-${entry.id}`}
               style={{ touchAction: "manipulation" }}
             >
               {copiedUID
-                ? <Check className="w-5 h-5 text-[var(--success)]" />
-                : <Copy className="w-5 h-5" />}
+                ? <Check className="w-4 h-4 sm:w-5 sm:h-5 text-[var(--success)]" />
+                : <Copy className="w-4 h-4 sm:w-5 sm:h-5" />}
             </button>
           </div>
 
           {/* Password row */}
           {entry.password && (
-            <div className="flex items-center gap-1.5 text-xs">
+            <div className="uid-card-info-row flex items-center gap-1 sm:gap-1.5 text-[11px] sm:text-xs min-h-[24px]">
               <span className="text-[var(--text-muted)] font-mono shrink-0 w-7">Pass</span>
               <span className="font-mono text-[var(--text-primary)] flex-1 min-w-0 truncate">
                 {showPassword ? entry.password : "••••••••"}
               </span>
               <button
                 onClick={() => copy(entry.password!, "pass")}
-                className="shrink-0 text-[var(--text-muted)] hover:text-[var(--primary)] transition-colors p-1.5"
+                className="uid-card-copy shrink-0 text-[var(--text-muted)] hover:text-[var(--primary)] transition-colors p-1 sm:p-1.5"
                 title="Copy Password"
                 data-testid={`btn-copy-pass-${entry.id}`}
                 style={{ touchAction: "manipulation" }}
               >
                 {copiedPass
-                  ? <Check className="w-5 h-5 text-[var(--success)]" />
-                  : <Copy className="w-5 h-5" />}
+                  ? <Check className="w-4 h-4 sm:w-5 sm:h-5 text-[var(--success)]" />
+                  : <Copy className="w-4 h-4 sm:w-5 sm:h-5" />}
               </button>
             </div>
           )}
