@@ -515,7 +515,7 @@ def fetch_uids():
         'network_error': sum(1 for item in results if item['result'].get('error') == 'network_error'),
     }
     # Aggregate outcome counts only. Never log UIDs, passwords, or sessions.
-    app.logger.info(
+    app.logger.warning(
         'uid_fetch_batch total=%d success=%d login=%d limited=%d network=%d unavailable=%d',
         len(results), diagnostics['success'], diagnostics['login_required'],
         diagnostics['limited'], diagnostics['network_error'], diagnostics['unavailable'],
