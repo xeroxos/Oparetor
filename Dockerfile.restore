@@ -6,7 +6,7 @@ RUN npm install -g pnpm@10.20.0
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json tsconfig.base.json ./
 COPY artifacts/uid-web ./artifacts/uid-web
 COPY lib ./lib
-RUN pnpm install --filter '@workspace/uid-web...' --frozen-lockfile --reporter=append-only --network-concurrency=4 > /tmp/pnpm-install.log 2>&1 || { tail -n 150 /tmp/pnpm-install.log; exit 1; }
+RUN pnpm install --filter '@workspace/uid-web...' --no-frozen-lockfile --reporter=append-only --network-concurrency=4 > /tmp/pnpm-install.log 2>&1 || { tail -n 150 /tmp/pnpm-install.log; exit 1; }
 RUN pnpm --filter @workspace/uid-web run build
 
 FROM python:3.12-slim AS app
