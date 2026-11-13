@@ -61,6 +61,9 @@ function UIDCardImpl({
     window.location.href = `fb://profile/${entry.uid}`;
   };
 
+  const avatarURL = entry.profilePic && /^https:\/\//i.test(entry.profilePic)
+    ? entry.profilePic : undefined;
+
   const initials = entry.name
     ? entry.name.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase()
     : (entry.uid?.substring(0, 2) || "??");
@@ -136,7 +139,7 @@ function UIDCardImpl({
 
         {/* Avatar */}
         <Avatar className="w-[72px] h-[72px] border-2 border-card-border shrink-0 rounded-xl">
-          <AvatarImage src={entry.profilePic} alt={entry.name || entry.uid} className="object-cover" loading="lazy" />
+          <AvatarImage src={avatarURL} alt={entry.name || entry.uid} className="object-cover" loading="lazy" />
           <AvatarFallback className="text-sm font-mono font-bold text-[var(--text-muted)] bg-background rounded-xl">
             {initials}
           </AvatarFallback>
@@ -289,10 +292,8 @@ function UIDCardImpl({
           <div className="flex items-center gap-1.5 text-xs">
             <span className="text-[var(--text-muted)] font-mono shrink-0 w-7">UID</span>
             <span
-              className="font-mono text-[var(--text-primary)] truncate cursor-pointer hover:text-[var(--primary)] transition-colors flex-1 min-w-0"
-              onClick={() => copy(entry.uid, "uid")}
-              title="Tap to copy UID"
-              style={{ touchAction: "manipulation" }}
+              className="font-mono text-[var(--text-primary)] truncate flex-1 min-w-0 select-text"
+              title="UID (use the copy button)"
             >
               {entry.uid}
             </span>
