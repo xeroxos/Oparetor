@@ -72,7 +72,7 @@ export default function Home() {
     // Resume previously system-paused UIDs; still respect user opt-out on import.
     const pending = uids.filter(u =>
       (u.retryQueued && effectiveUIDStatus(u) !== "success") ||
-      (u.status === "pending" &&
+      (effectiveUIDStatus(u) === "pending" &&
         ((!u.paused && !u.fetchedAt) || (u.paused && Boolean(u.fetchError))))
     );
     if (pending.length) void batchFetch(pending);
