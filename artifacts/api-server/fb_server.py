@@ -490,7 +490,7 @@ def fetch_uids():
     results = []
     # Limit simultaneous upstream requests when processing repeated large imports.
     # A failed worker must never silently drop a UID from the response.
-    max_workers = min(3, len(uid_list))
+    max_workers = min(9, len(uid_list))
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {
             pool.submit(process_one, item): str(item['uid'])
