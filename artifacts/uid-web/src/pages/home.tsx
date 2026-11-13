@@ -6,7 +6,7 @@ import { usePreferences } from "@/hooks/use-preferences";
 import { Input } from "@/components/ui/input";
 import { UIDCard } from "@/components/uid-card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import type { UIDEntry } from "@/lib/storage";
+import { getUIDs, waitForUIDStorage, type UIDEntry } from "@/lib/storage";
 import { copyText } from "@/lib/clipboard";
 
 type Filter = "all" | "success" | "error" | "pending";
@@ -47,19 +47,19 @@ export default function Home() {
   }, []);
 
   const handleBatchFetch = useCallback(async (items: UIDEntry[]) => {
-    const limited = items.slice(0, MAX_MANUAL_FETCH);
-    if (limited.length === 0) return;
+    if (items.length === 0) return;
     setFetchingIds(prev => {
       const next = new Set(prev);
-      for (const item of limited) next.add(item.id);
+      for (const item of items) next.add(item.id);
       return next;
     });
     try {
-      await manualFetch(limited);
+      // Queue the entire retry selection; the worker sends only six per request.
+      await manualFetch(items);
     } finally {
       setFetchingIds(prev => {
         const next = new Set(prev);
-        for (const item of limited) next.delete(item.id);
+        for (const item of items) next.delete(item.id);
         return next;
       });
     }
@@ -77,10 +77,16 @@ export default function Home() {
 
   useEffect(() => {
     if (!prefs.autoRetry) return;
-    const failed = uids.filter(u => u.status === "error" && !fetchingIds.has(u.id));
-    if (failed.length) void handleBatchFetch(failed);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefs.autoRetry]);
+    let cancelled = false;
+    // IndexedDB hydration is asynchronous. The old effect ran only before
+    // hydration and retried just 24 records, then appeared to stop.
+    void waitForUIDStorage().then(() => {
+      if (cancelled) return;
+      const failed = getUIDs().filter(u => u.status === "error");
+      if (failed.length) void manualFetch(failed);
+    });
+    return () => { cancelled = true; };
+  }, [prefs.autoRetry, manualFetch]);
 
   const stats = useMemo(() => ({
     total: uids.length,
@@ -161,8 +167,8 @@ export default function Home() {
             <button onClick={() => setShowPasswords(v => !v)} className={`rounded-xl p-2 transition-colors ${showPasswords ? "bg-[var(--primary)] text-white" : "bg-[var(--primary-dim)] text-[var(--primary)]"}`} title={showPasswords ? "Hide passwords" : "Show passwords"} aria-label={showPasswords ? "Hide passwords" : "Show passwords"}>
               {showPasswords ? <Eye className="h-5 w-5" /> : <EyeOff className="h-5 w-5" />}
             </button>
-            <button disabled={stats.error === 0 || active} onClick={() => void handleBatchFetch(uids.filter(u => u.status === "error").slice(0, MAX_MANUAL_FETCH))} className="flex items-center gap-1 rounded-xl bg-[#24334c] px-2.5 py-2 text-xs font-mono text-[var(--text-primary)] disabled:opacity-50">
-              <RotateCw className={`h-4 w-4 ${active ? "animate-spin" : ""}`} /> Retry {Math.min(MAX_MANUAL_FETCH, stats.error)}
+            <button disabled={stats.error === 0 || active} onClick={() => void handleBatchFetch(uids.filter(u => u.status === "error"))} className="flex items-center gap-1 rounded-xl bg-[#24334c] px-2.5 py-2 text-xs font-mono text-[var(--text-primary)] disabled:opacity-50">
+              <RotateCw className={`h-4 w-4 ${active ? "animate-spin" : ""}`} /> Retry {stats.error.toLocaleString()}
             </button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild><button aria-label="More actions" className="p-1 text-[var(--text-muted)]"><MoreHorizontal className="h-5 w-5" /></button></DropdownMenuTrigger>
